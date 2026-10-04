@@ -1,0 +1,1713 @@
+openapi: 3.1.0
+info:
+  title: NioDB API
+  summary: NioDB — The Agentic DB that works.
+  version: 0.1.0
+  description: A lightweight database with natural-language queries, powered by Nio.
+    Each Rust server has one workspace; clients do not supply workspace IDs. Nio CLI
+    powers chat and read queries. AlaSQL executes restricted SQL. Recovery uses a
+    checksummed JSONL journal, derived TOON artifacts and content-addressed file blobs.
+    Backend credentials provision app users; users log in with username and password.
+    Protected routes accept bearer credentials. Use HTTPS for remote access. Responses
+    and errors carry X-Request-ID.
+servers:
+- url: /
+  description: Same origin as the deployed NioDB server
+security:
+- bearerAuth: []
+paths:
+  /docs/:
+    get:
+      operationId: getGuides
+      summary: Open NioDB guides
+      description: Self-contained documentation for setup, authentication, queries,
+        files, chat and events. /docs redirects here.
+      security: []
+      responses:
+        '200':
+          description: Documentation page
+          content:
+            text/html:
+              schema:
+                type: string
+  /console:
+    get:
+      operationId: getConsole
+      summary: Open NioDB Web Console Dashboard
+      description: Interactive web console to query and manage data, files, events, webhooks, auth users, and server configuration.
+      security: []
+      responses:
+        '200':
+          description: Web console dashboard page
+          content:
+            text/html:
+              schema:
+                type: string
+  /doc:
+    get:
+      operationId: getDocumentation
+      summary: Open interactive API documentation
+      description: Swagger UI with Try it out and bearer authorization. Browser internet
+        access is needed to load version-pinned CDN assets.
+      security: []
+      responses:
+        '200':
+          description: Interactive API documentation page
+          content:
+            text/html:
+              schema:
+                type: string
+  /health:
+    get:
+      operationId: getHealth
+      summary: Check core database readiness
+      description: Nio availability does not affect core database readiness.
+      security: []
+      responses:
+        '200':
+          description: Core database is ready
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - status
+                properties:
+                  status:
+                    type: string
+                    const: ok
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /api/v1/status:
+    get:
+      operationId: getStatus
+      summary: Inspect Nio and AlaSQL readiness
+      responses:
+        '200':
+          description: Current assistance readiness; contains no credentials or paths
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - nio
+                - alasql
+                properties:
+                  nio:
+                    type: object
+                    required:
+                    - status
+                    properties:
+                      status:
+                        type: string
+                        enum:
+                        - ready
+                        - missing
+                        - incompatible
+                        - unconfigured
+                        - unavailable
+                      version:
+                        type: string
+                  alasql:
+                    type: object
+                    required:
+                    - status
+                    properties:
+                      status:
+                        type: string
+                        enum:
+                        - ready
+                        - unavailable
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Error'
+      description: Startup checks inspect CLI compatibility and configuration; ready
+        does not guarantee provider connectivity. Restart after configuration changes.
+  /api/v1/records:
+    get:
+      operationId: listRecords
+      summary: List records
+      description: Lists records across all collections or one collection, oldest first. Only records visible to the caller are returned. The older /api/v1/artifacts route remains available.
+      parameters:
+      - name: collection
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 50
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Record page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Record'
+                  next_cursor:
+                    type: [string, 'null']
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      operationId: createRecord
+      summary: Create a record in a collection
+      description: A collection groups similar records and becomes a SQL table when its name is a safe SQL identifier. The collection name 'files' is reserved for file metadata. Idempotency-Key may be supplied for retries.
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [collection, data]
+              properties:
+                collection:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                data:
+                  type: object
+      responses:
+        '201':
+          description: Record committed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Record'
+        default:
+          $ref: '#/components/responses/Error'
+  /api/v1/records/{id}:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      operationId: getRecord
+      summary: Read a record by ID
+    patch:
+      operationId: updateRecord
+      summary: Update a record by ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Updated record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Record'
+        default:
+          $ref: '#/components/responses/Error'
+    delete:
+      operationId: deleteRecord
+      summary: Delete a record by ID
+      responses:
+        '200':
+          description: Deletion confirmation
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          $ref: '#/components/responses/Error'
+  /api/v1/records/bulk:
+    post:
+      operationId: bulkRecords
+      summary: High-throughput bulk record operations (insert, update, delete)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Bulk operation summary
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          $ref: '#/components/responses/Error'
+  /api/v1/artifacts:
+    parameters: []
+    get:
+      operationId: listArtifacts
+      summary: List records (legacy artifacts route)
+      deprecated: true
+      description: Returns records ordered by creation time and ID, oldest first.
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 50
+      - name: cursor
+        in: query
+        description: Opaque cursor bound to the workspace and filters.
+        schema:
+          type: string
+      - name: type
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Artifact page
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                - next_cursor
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Artifact'
+                  next_cursor:
+                    type:
+                    - string
+                    - 'null'
+                    description: Null when no further page is available.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      operationId: createArtifact
+      summary: Create a record (legacy artifacts route)
+      deprecated: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - type
+              - data
+              properties:
+                type:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                  description: Nonempty, maximum 128 UTF-8 bytes. The type files is
+                    reserved for storage metadata.
+                data:
+                  type: object
+                  additionalProperties: true
+                  description: Serialized data must fit within 256 KiB; total request
+                    body is limited to 300 KiB.
+      responses:
+        '201':
+          description: Artifact committed durably; ID and timestamps assigned by the
+            server
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Artifact'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        default:
+          $ref: '#/components/responses/Error'
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        description: Optional 1–128 ASCII characters, scoped to principal and workspace.
+          Repeating identical data returns the original artifact; different data returns
+          409.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+  /api/v1/artifacts/{id}:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    get:
+      operationId: getArtifact
+      summary: Read a record (legacy artifacts route)
+      deprecated: true
+      responses:
+        '200':
+          description: Artifact
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Artifact'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Artifact does not exist or is not visible in this workspace
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        default:
+          $ref: '#/components/responses/Error'
+  /api/v1/assist:
+    post:
+      operationId: assist
+      summary: Ask Nio a natural-language question about database data
+      description: "Nio can retrieve authorized records, query them, and summarize\
+        \ results.\nAmbiguous questions return a clarification request. This operation\
+        \ cannot\nmutate records or execute arbitrary shell commands. A conversation\
+        \ ID\nmust belong to the caller and the server. References identify\nretrieved\
+        \ records; an empty list is allowed for clarification or no results.\n Natural-language\
+        \ plans currently support type, literal text search, scalar equality filters,\
+        \ ordering by recency and at most 20 records. Joins and aggregates are available\
+        \ through the SQL endpoint. Selected skill guidance cannot expand data access\
+        \ or enable tools."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - message
+              properties:
+                message:
+                  type: string
+                  minLength: 1
+                  maxLength: 8192
+                  description: Maximum 8192 UTF-8 bytes.
+                conversation_id:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+            example:
+              message: What did we decide about authentication in this project?
+      responses:
+        '200':
+          description: Nio's answer or clarification question
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - request_id
+                - conversation_id
+                - status
+                - message
+                - references
+                properties:
+                  request_id:
+                    type: string
+                  conversation_id:
+                    type: string
+                  status:
+                    type: string
+                    enum:
+                    - answered
+                    - needs_clarification
+                  message:
+                    type: string
+                  references:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                      - record_id
+                      - artifact_id
+                      - revision
+                      properties:
+                        record_id:
+                          type: string
+                        artifact_id:
+                          type: string
+                          deprecated: true
+                        revision:
+                          type: integer
+                          minimum: 1
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+        '504':
+          description: Nio assistance timed out and execution was cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        default:
+          $ref: '#/components/responses/Error'
+  /openapi.yaml:
+    get:
+      operationId: getOpenApi
+      summary: Read this API contract
+      security: []
+      responses:
+        '200':
+          description: OpenAPI 3.1 YAML
+          content:
+            application/yaml:
+              schema:
+                type: string
+  /api/v1/skills:
+    get:
+      operationId: listSkills
+      summary: List granted, installed and enabled Nio skills
+      description: Catalogs are captured at startup. Host paths and executables are
+        not exposed. Small granted SKILL.md files can guide assistance.
+      responses:
+        '200':
+          description: Granted capabilities
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                - mode
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Capability'
+                  mode:
+                    type: string
+                    const: guidance
+        default: &id001
+          $ref: '#/components/responses/Error'
+  /api/v1/plugins:
+    get:
+      operationId: listPlugins
+      summary: List granted, installed and enabled Nio plugins
+      description: Catalogs are captured at startup. Host paths and executables are
+        not exposed. Discovery only; this endpoint does not execute plugins.
+      responses:
+        '200':
+          description: Granted capabilities
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                - mode
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Capability'
+                  mode:
+                    type: string
+                    const: discovery
+        default: *id001
+  /api/v1/query:
+    post:
+      operationId: query
+      summary: Execute a restricted read-only AlaSQL SELECT
+      description: Only this server’s records are supplied to AlaSQL. Each safe collection
+        name becomes a table. The legacy artifacts table contains all visible records. Data keys are flattened; server metadata overrides
+        colliding keys. Supports bound scalar parameters, up to two joins, grouping
+        and selected aggregates/functions. Arbitrary JavaScript, external files, SQL
+        writes and multiple statements are rejected. Default and maximum LIMIT is
+        200.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - sql
+              properties:
+                sql:
+                  type: string
+                  minLength: 1
+                  maxLength: 8192
+                  description: Maximum 8192 UTF-8 bytes.
+                parameters:
+                  type: array
+                  default: []
+                  items:
+                    type:
+                    - string
+                    - number
+                    - boolean
+                    - 'null'
+            example:
+              sql: SELECT id, title FROM tasks WHERE status = ? LIMIT 20
+              parameters:
+              - pending
+      responses:
+        '200':
+          description: Query result
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                - engine
+                properties:
+                  items:
+                    type: array
+                    maxItems: 200
+                    items:
+                      type: object
+                      additionalProperties: true
+                  engine:
+                    type: string
+                    const: alasql
+        default: *id001
+  /api/v1/auth/register:
+    post:
+      operationId: registerUser
+      summary: Backend creates an app user
+      description: Requires a backend server credential. User sessions cannot register
+        users. Users share server data, while conversations belong to each user. Passwords
+        use salted PBKDF2-HMAC-SHA256 with 600,000 rounds. Password hashes are never
+        returned.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Credentials'
+      responses:
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - user
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+        default: &id002
+          $ref: '#/components/responses/Error'
+      tags:
+      - Auth
+  /auth/register:
+    post:
+      operationId: registerUserAlias
+      summary: Backend creates an app user
+      description: Requires a backend server credential. User sessions cannot register
+        users. Users share server data, while conversations belong to each user. Passwords
+        use salted PBKDF2-HMAC-SHA256 with 600,000 rounds. Password hashes are never
+        returned. Alias of /api/v1/auth/register.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Credentials'
+      responses:
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - user
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+        default:
+          $ref: '#/components/responses/Error'
+      tags:
+      - Auth
+  /api/v1/auth/login:
+    post:
+      operationId: loginUser
+      summary: Log in with username and password
+      security: []
+      description: Returns an opaque bearer token valid for seven days. Limited to
+        30 login attempts per minute per server and two concurrent password operations.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Credentials'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Login'
+        default: *id002
+      tags:
+      - Auth
+  /auth/login:
+    post:
+      operationId: loginUserAlias
+      summary: Log in with username and password
+      security: []
+      description: Returns an opaque bearer token valid for seven days. Limited to
+        30 login attempts per minute per server and two concurrent password operations.
+        Alias of /api/v1/auth/login.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Credentials'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Login'
+        default:
+          $ref: '#/components/responses/Error'
+      tags:
+      - Auth
+  /api/v1/auth/logout:
+    post:
+      operationId: logoutUser
+      summary: Revoke the current user session
+      description: Requires a user session. Revocation survives restart. Backend credentials
+        cannot use this route.
+      responses:
+        '204':
+          description: Session revoked
+        default: *id002
+      tags:
+      - Auth
+  /auth/logout:
+    post:
+      operationId: logoutUserAlias
+      summary: Revoke the current user session
+      description: Requires a user session. Revocation survives restart. Backend credentials
+        cannot use this route. Alias of /api/v1/auth/logout.
+      responses:
+        '204':
+          description: Session revoked
+        default:
+          $ref: '#/components/responses/Error'
+      tags:
+      - Auth
+  /api/v1/auth/me:
+    get:
+      operationId: getCurrentUser
+      summary: Read the logged-in user
+      description: Requires a user session. Password/token hashes are never returned.
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - user
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+        default: *id002
+      tags:
+      - Auth
+  /auth/me:
+    get:
+      operationId: getCurrentUserAlias
+      summary: Read the logged-in user
+      description: Requires a user session. Password/token hashes are never returned.
+        Alias of /api/v1/auth/me.
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - user
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+        default:
+          $ref: '#/components/responses/Error'
+      tags:
+      - Auth
+  /api/v1/auth/users:
+    get:
+      operationId: listUsers
+      tags:
+      - Auth
+      summary: List registered users
+      description: Backend credential only. Returns all registered users in the workspace.
+      responses:
+        '200':
+          description: List of registered users
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - users
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+        default:
+          $ref: '#/components/responses/Error'
+  /auth/users:
+    get:
+      operationId: listUsersAlias
+      tags:
+      - Auth
+      summary: List registered users
+      description: Alias of /api/v1/auth/users; backend credential only.
+      responses:
+        '200':
+          description: List of registered users
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - users
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+        default:
+          $ref: '#/components/responses/Error'
+  /api/v1/auth/users/{id}:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    delete:
+      operationId: deleteUser
+      tags:
+      - Auth
+      summary: Delete a user
+      description: Backend credential only. Revokes sessions and removes linked files and chat history. Shared files and general artifacts remain.
+      responses:
+        '204':
+          description: User deleted
+        default:
+          $ref: '#/components/responses/Error'
+  /auth/users/{id}:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    delete:
+      operationId: deleteUserAlias
+      tags:
+      - Auth
+      summary: Delete a user
+      description: Alias of /api/v1/auth/users/{id}; backend credential only.
+      responses:
+        '204':
+          description: User deleted
+        default:
+          $ref: '#/components/responses/Error'
+  /api/v1/events:
+    post:
+      operationId: publishEvent
+      tags:
+      - Events
+      summary: Broadcast a live event
+      description: Any authenticated caller can broadcast an event to all connected subscribers. Data must fit 16 KiB. The server accepts up to 100 published events per second. Returns before asynchronous workers and webhooks finish. Events have no replay.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, data]
+              properties:
+                name:
+                  type: string
+                  pattern: '^[A-Za-z][A-Za-z0-9._-]{0,63}$'
+                data:
+                  type: object
+      responses:
+        '202':
+          description: Event broadcast and dispatch scheduled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveEvent'
+        default:
+          $ref: '#/components/responses/Error'
+  /api/v1/events/stream:
+    get:
+      operationId: streamEvents
+      tags:
+      - Events
+      summary: Subscribe to live events
+      description: Authenticated SSE stream. Subscribe to one event with ?name=orders.created; omit name or use '*' for all events. Each message contains a LiveEvent JSON object. A gap event reports missed messages when a subscriber falls behind. Use an Authorization header; replay is not available.
+      parameters:
+      - name: name
+        in: query
+        description: Event name to receive, or '*' for every event. Omit for every event.
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Server-Sent Events stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        default:
+          $ref: '#/components/responses/Error'
+  /api/v1/events/workers:
+    get:
+      operationId: listEventWorkers
+      tags:
+      - Events
+      summary: List event workers
+      description: Backend credential only. Source is omitted.
+      responses:
+        '200':
+          description: Worker registrations
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EventWorker'
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      operationId: createEventWorker
+      tags:
+      - Events
+      summary: Register trusted TypeScript event worker
+      description: Backend credential only. Trusted administrator code runs in a separate Node 22+ process with server privileges. Source is journaled privately. It must export a default function receiving one LiveEvent. Five-second limit, 64 MiB Node heap and two concurrent executions. Event publishing does not await it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [event_name, source]
+              properties:
+                event_name:
+                  type: string
+                  description: Exact event name or '*'.
+                source:
+                  type: string
+                  maxLength: 32768
+      responses:
+        '201':
+          description: Worker registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventWorker'
+        default:
+          $ref: '#/components/responses/Error'
+  /api/v1/events/workers/{id}:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    delete:
+      operationId: deleteEventWorker
+      tags:
+      - Events
+      summary: Remove event worker
+      description: Backend credential only.
+      responses:
+        '204':
+          description: Worker removed
+        default:
+          $ref: '#/components/responses/Error'
+  /api/v1/webhooks:
+    get:
+      operationId: listWebhooks
+      tags:
+      - Webhooks
+      summary: List webhooks
+      description: Backend credential only. Signing secrets are omitted.
+      responses:
+        '200':
+          description: Webhook registrations
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Webhook'
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      operationId: createWebhook
+      tags:
+      - Webhooks
+      summary: Register webhook
+      description: Backend credential only. HTTPS URL required; HTTP loopback is allowed. Creation returns the signing secret once. Delivery uses three attempts while the server runs, a five-second timeout and no redirects. The X-NioDB-Signature header is sha256=<hex HMAC-SHA256> of the exact JSON body keyed by the returned secret string. Delivery is not durable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [event_name, url]
+              properties:
+                event_name:
+                  type: string
+                  description: Exact event name or '*'.
+                url:
+                  type: string
+                  format: uri
+                  maxLength: 2048
+      responses:
+        '201':
+          description: Webhook registered; save secret now
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Webhook'
+                - type: object
+                  required: [secret]
+                  properties:
+                    secret:
+                      type: string
+                      writeOnly: true
+        default:
+          $ref: '#/components/responses/Error'
+  /api/v1/webhooks/{id}:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    delete:
+      operationId: deleteWebhook
+      tags:
+      - Webhooks
+      summary: Remove webhook
+      description: Backend credential only.
+      responses:
+        '204':
+          description: Webhook removed
+        default:
+          $ref: '#/components/responses/Error'
+  /chat:
+    post:
+      operationId: chat
+      tags:
+      - Chat
+      summary: Chat with Nio using app fields and database queries
+      description: Ordinary conversation, general knowledge and read-only retrieval.
+        Fields and queries are optional. Nio can also plan retrieval automatically.
+        Conversation IDs belong to the caller. References are validated against supplied
+        records. File metadata is queryable as type files; bytes are not read or sent
+        automatically. No tool execution or agent mutations.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: Nio's answer or clarification question
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - request_id
+                - conversation_id
+                - status
+                - message
+                - references
+                properties:
+                  request_id:
+                    type: string
+                  conversation_id:
+                    type: string
+                  status:
+                    type: string
+                    enum:
+                    - answered
+                    - needs_clarification
+                  message:
+                    type: string
+                  references:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                      - record_id
+                      - artifact_id
+                      - revision
+                      properties:
+                        record_id:
+                          type: string
+                        artifact_id:
+                          type: string
+                          deprecated: true
+                        revision:
+                          type: integer
+                          minimum: 1
+        default: *id002
+  /api/v1/chat:
+    post:
+      operationId: chatVersioned
+      tags:
+      - Chat
+      summary: Chat with Nio using app fields and database queries
+      description: Ordinary conversation, general knowledge and read-only retrieval.
+        Fields and queries are optional. Nio can also plan retrieval automatically.
+        Conversation IDs belong to the caller. References are validated against supplied
+        records. File metadata is queryable as type files; bytes are not read or sent
+        automatically. No tool execution or agent mutations.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: Nio's answer or clarification question
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - request_id
+                - conversation_id
+                - status
+                - message
+                - references
+                properties:
+                  request_id:
+                    type: string
+                  conversation_id:
+                    type: string
+                  status:
+                    type: string
+                    enum:
+                    - answered
+                    - needs_clarification
+                  message:
+                    type: string
+                  references:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                      - record_id
+                      - artifact_id
+                      - revision
+                      properties:
+                        record_id:
+                          type: string
+                        artifact_id:
+                          type: string
+                          deprecated: true
+                        revision:
+                          type: integer
+                          minimum: 1
+        default: *id002
+  /api/v1/storage:
+    get:
+      operationId: listBuckets
+      tags:
+      - Files
+      summary: List buckets
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Bucket'
+        default: *id002
+    post:
+      operationId: createBucket
+      tags:
+      - Files
+      summary: Create a bucket
+      description: Existing buckets are returned unchanged. Uploading also creates
+        a bucket automatically.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - name
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 63
+                  pattern: ^[a-z0-9_-]+$
+                  description: Lowercase ASCII name. Reserved filesystem device names
+                    such as con, prn, aux, nul, com1 and lpt1 are rejected.
+      responses:
+        '201':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Bucket'
+        default: *id002
+  /api/v1/storage/{bucket}:
+    parameters:
+    - &id003
+      name: bucket
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^[a-z0-9_-]{1,63}$
+    get:
+      operationId: listFiles
+      tags:
+      - Files
+      summary: List bucket files
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 50
+      - name: cursor
+        in: query
+        description: File ID returned as next_cursor, bound to this bucket.
+        schema: &id004
+          type: string
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                - next_cursor
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/File'
+                  next_cursor:
+                    type:
+                    - string
+                    - 'null'
+        default: *id002
+  /api/v1/storage/{bucket}/upload:
+    parameters:
+    - *id003
+    post:
+      operationId: uploadFile
+      tags:
+      - Files
+      summary: Stream one file into a bucket
+      description: Up to 16 MiB per file, 60 seconds per upload, four concurrent uploads.
+        Current logical quota is 128 MiB of file references per server. Identical
+        bytes share a blob within a bucket. Multipart requests contain exactly one
+        field named file. Raw requests require filename in the query. Filenames are
+        metadata, never host paths. The maximum metadata count is 10,000 files.
+      parameters:
+      - name: filename
+        in: query
+        description: Required for raw uploads. Multipart uses the file field filename.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 255
+      - name: user_id
+        in: query
+        description: Optional owner user ID. If absent, every authenticated caller can access the file. User sessions may use only their own ID; backend credentials may use any existing user ID. Linked files are visible only to the owner's session, including through artifacts, SQL and Nio.
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '201':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/File'
+        default: *id002
+  /api/v1/storage/{bucket}/{id}:
+    parameters:
+    - *id003
+    - &id005
+      name: id
+      in: path
+      required: true
+      schema: *id004
+    get:
+      operationId: downloadFile
+      tags:
+      - Files
+      summary: Stream a file download
+      description: Served as attachments. Supports one bytes Range, including suffix
+        ranges. Multiple or unsatisfiable ranges return 416. If-Range supports the
+        strong ETag; mismatch returns the complete file.
+      parameters:
+      - name: Range
+        in: header
+        schema: *id004
+      - name: If-Range
+        in: header
+        schema: *id004
+      responses:
+        '200':
+          description: Complete file
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '206':
+          description: Partial file; Content-Range identifies the bytes returned
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '416': *id002
+        default: *id002
+    delete:
+      operationId: deleteFile
+      tags:
+      - Files
+      summary: Delete a file and its metadata
+      description: Blob bytes are removed once no file in the bucket references them.
+        Its query/chat metadata artifact is removed as well.
+      responses:
+        '204':
+          description: File deleted
+        default: *id002
+  /api/v1/storage/{bucket}/{id}/metadata:
+    parameters:
+    - *id003
+    - *id005
+    get:
+      operationId: getFileMetadata
+      tags:
+      - Files
+      summary: Read file metadata
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/File'
+        default: *id002
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Bearer credential supporting combined client-token:secret-token (or individual client/secret tokens, both with full backend access), or expiring app-user session. Keep backend credentials off public web/mobile clients. Registration requires a backend credential; me/logout require a user session.
+  parameters: {}
+  schemas:
+    Record:
+      type: object
+      required: [id, collection, data, revision, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        collection:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+        revision:
+          type: integer
+          minimum: 1
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Artifact:
+      type: object
+      required:
+      - id
+      - type
+      - data
+      - revision
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+        revision:
+          type: integer
+          minimum: 1
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Error:
+      type: object
+      required:
+      - error
+      - request_id
+      properties:
+        request_id:
+          type: string
+        error:
+          type: object
+          required:
+          - code
+          - message
+          properties:
+            code:
+              type: string
+              examples:
+              - nio_unavailable
+              - invalid_request
+            message:
+              type: string
+    Capability:
+      type: object
+      required:
+      - name
+      - description
+      - enabled
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        enabled:
+          type: boolean
+          const: true
+    Credentials:
+      type: object
+      additionalProperties: false
+      required:
+      - username
+      - password
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 64
+          pattern: ^[A-Za-z0-9_.-]+$
+          description: Trimmed and normalized to lowercase.
+        password:
+          type: string
+          format: password
+          writeOnly: true
+          maxLength: 1024
+          description: Registration requires 12–1024 UTF-8 bytes.
+    User:
+      type: object
+      required:
+      - id
+      - username
+      - created_at
+      properties:
+        id: *id004
+        username: *id004
+        created_at:
+          type: string
+          format: date-time
+    Login:
+      type: object
+      required:
+      - access_token
+      - token_type
+      - expires_in
+      - expires_at
+      - user
+      properties:
+        access_token: *id004
+        token_type:
+          type: string
+          const: Bearer
+        expires_in:
+          type: integer
+          const: 604800
+        expires_at:
+          type: integer
+          description: Unix timestamp in seconds.
+        user:
+          $ref: '#/components/schemas/User'
+    ChatQuery:
+      type: object
+      additionalProperties: false
+      required:
+      - sql
+      properties:
+        sql:
+          type: string
+          maxLength: 8192
+        parameters:
+          type: array
+          default: []
+          items:
+            type:
+            - string
+            - number
+            - boolean
+            - 'null'
+    ChatRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - message
+      properties:
+        message:
+          type: string
+          minLength: 1
+          maxLength: 8192
+          description: Maximum 8192 UTF-8 bytes.
+        conversation_id:
+          type: string
+          maxLength: 128
+        fields:
+          type: object
+          additionalProperties: true
+          description: Untrusted app context; maximum 4 KiB after safe JSON encoding.
+        queries:
+          type: array
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/ChatQuery'
+          description: Restricted read-only SQL executed before chatting; combined
+            results must fit 8 KiB.
+    Bucket:
+      type: object
+      required:
+      - name
+      - created_at
+      - created_by
+      properties:
+        name: *id004
+        created_at:
+          type: string
+          format: date-time
+        created_by: *id004
+    File:
+      type: object
+      required:
+      - id
+      - record_id
+      - artifact_id
+      - bucket
+      - filename
+      - sha256
+      - size
+      - mime
+      - created_at
+      - created_by
+      properties:
+        id: *id004
+        record_id: *id004
+        artifact_id: *id004
+        bucket: *id004
+        filename: *id004
+        sha256:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        size:
+          type: integer
+          minimum: 0
+          maximum: 16777216
+        mime: *id004
+        created_at:
+          type: string
+          format: date-time
+        created_by: *id004
+        user_id:
+          type: string
+          description: Present only for owner-linked files.
+    LiveEvent:
+      type: object
+      required: [id, name, data, actor, created_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        data:
+          type: object
+        actor:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    EventWorker:
+      type: object
+      required: [id, event_name, created_at, created_by]
+      properties:
+        id:
+          type: string
+        event_name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        created_by:
+          type: string
+    Webhook:
+      type: object
+      required: [id, event_name, url, created_at, created_by]
+      properties:
+        id:
+          type: string
+        event_name:
+          type: string
+        url:
+          type: string
+          format: uri
+        created_at:
+          type: string
+          format: date-time
+        created_by:
+          type: string
+  responses:
+    Error:
+      description: 'Request failed; no credentials, raw CLI output or internal paths.
+        Common statuses: 400 invalid request/query, 401 authentication, 403 workspace
+        denial, 404 missing record, 409 idempotency/conversation conflict, 413 size
+        limit, 422 malformed body, 429 capacity exhausted, 502 invalid Nio output,
+        503 dependency/storage unavailable, 504 timeout.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: 'Bearer credential is missing, invalid or expired. Backend credentials
+        have no automatic expiry; app-user sessions expire after seven days. WWW-Authenticate:
+        Bearer is returned.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Caller lacks access to this data or operation.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unavailable:
+      description: Required database, Nio, or AlaSQL service is unavailable; code
+        identifies the component.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+tags:
+- name: Auth
+  description: Backend-managed username/password users and sessions.
+- name: Files
+  description: Bucket-based streaming file storage with optional user ownership.
+- name: Events
+  description: Authenticated live event broadcast and trusted backend event workers.
+- name: Webhooks
+  description: Backend-managed outgoing event notifications.
+- name: Chat
+  description: Nio conversation with app context and database queries.

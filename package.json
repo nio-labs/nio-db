@@ -1,0 +1,44 @@
+{
+  "name": "@nio-labs/nio-db",
+  "version": "0.1.0",
+  "description": "NioDB \u2014 The Agentic DB that works. A lightweight database with natural-language queries, powered by Nio.",
+  "license": "UNLICENSED",
+  "bin": {
+    "nio-db": "bin/niodb.cjs",
+    "niodb": "bin/niodb.cjs"
+  },
+  "files": [
+    "bin/",
+    "runtime/",
+    "openapi.yaml",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.cjs",
+    "build": "cargo build --release --locked",
+    "package:platform": "node scripts/package-platform.cjs",
+    "check:launcher": "node --test scripts/launcher.test.cjs",
+    "check:sql": "node --test scripts/sql.test.cjs",
+    "check:sdk": "node --test scripts/sdk.test.cjs",
+    "check:py": "python3 -m unittest discover -s packages/nio-db-py/tests",
+    "test": "npm run check:launcher && npm run check:sql && npm run check:sdk"
+  },
+  "dependencies": {
+    "alasql": "^4.0.0",
+    "@nio-labs/nio-ai": "0.3.3"
+  },
+  "optionalDependencies": {
+    "@nio-labs/nio-db-darwin-arm64": "0.1.0",
+    "@nio-labs/nio-db-darwin-x64": "0.1.0",
+    "@nio-labs/nio-db-linux-arm64": "0.1.0",
+    "@nio-labs/nio-db-linux-x64": "0.1.0",
+    "@nio-labs/nio-db-win32-arm64": "0.1.0",
+    "@nio-labs/nio-db-win32-x64": "0.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

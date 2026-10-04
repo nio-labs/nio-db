@@ -1,0 +1,972 @@
+<!doctype html>
+<html lang="en" class="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="description" content="NioDB documentation: The Agentic Database that works. Pure-Rust, SIMD vector search, multi-agent sessions, SQL, files, events, and client SDKs.">
+  <title>NioDB Docs — The Agentic DB that works.</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Google+Sans+Code:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #ffffff;
+      --bg-subtle: #f8fafc;
+      --bg-card: #ffffff;
+      --border: #e2e8f0;
+      --border-strong: #cbd5e1;
+      --fg: #0f172a;
+      --fg-muted: #64748b;
+      --fg-subtle: #94a3b8;
+      --primary: #0d9488;
+      --primary-hover: #0f766e;
+      --primary-subtle: #f0fdfa;
+      --primary-border: #ccfbf1;
+      --code-bg: #0f172a;
+      --code-fg: #f8fafc;
+      --badge-bg: #f1f5f9;
+      --badge-fg: #334155;
+      --sidebar-w: 240px;
+    }
+
+    html.dark {
+      --bg: #0b0f17;
+      --bg-subtle: #111827;
+      --bg-card: #111827;
+      --border: #1f2937;
+      --border-strong: #374151;
+      --fg: #f3f4f6;
+      --fg-muted: #9ca3af;
+      --fg-subtle: #6b7280;
+      --primary: #2dd4bf;
+      --primary-hover: #5eead4;
+      --primary-subtle: #042f2e;
+      --primary-border: #134e4a;
+      --code-bg: #030712;
+      --code-fg: #f9fafb;
+      --badge-bg: #1f2937;
+      --badge-fg: #e5e7eb;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    * { box-sizing: border-box; }
+    h1, h2, h3, h4, h5, h6, [id] {
+      scroll-margin-top: 56px;
+    }
+    body {
+      margin: 0;
+      color: var(--fg);
+      background: var(--bg);
+      font: 13.5px/1.65 'Google Sans Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      -webkit-font-smoothing: antialiased;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+
+    a { color: var(--primary); text-decoration: none; font-weight: 500; }
+    a:hover { text-decoration: underline; color: var(--primary-hover); }
+
+    /* TOP NAVBAR */
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(8px);
+    }
+    .top {
+      max-width: 1200px;
+      margin: auto;
+      padding: 10px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .brand-wrap { display: flex; align-items: center; gap: 12px; }
+    .brand {
+      color: var(--fg);
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -.03em;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .badge-pill {
+      font-size: 10px;
+      padding: 2px 7px;
+      border-radius: 9999px;
+      background: var(--primary-subtle);
+      color: var(--primary);
+      border: 1px solid var(--primary-border);
+      font-weight: 600;
+    }
+    .top-nav { display: flex; align-items: center; gap: 14px; font-size: 12px; }
+    .top-nav a { color: var(--fg-muted); }
+    .top-nav a:hover { color: var(--fg); text-decoration: none; }
+    
+    .theme-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 30px;
+      height: 30px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg-subtle);
+      color: var(--fg);
+      cursor: pointer;
+      padding: 0;
+      transition: all 0.15s;
+    }
+    .theme-btn:hover { border-color: var(--border-strong); background: var(--border); }
+    .theme-btn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+    /* LAYOUT */
+    .layout {
+      max-width: 1200px;
+      margin: auto;
+      padding: 28px 24px 80px;
+      display: grid;
+      grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+      gap: 40px;
+    }
+
+    aside {
+      position: sticky;
+      top: 60px;
+      height: calc(100vh - 80px);
+      overflow-y: auto;
+      padding-right: 12px;
+    }
+    aside strong {
+      display: block;
+      margin: 16px 0 8px;
+      font-size: 10.5px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--fg-subtle);
+    }
+    aside strong:first-child { margin-top: 0; }
+    aside a {
+      display: block;
+      padding: 4px 8px;
+      border-radius: 4px;
+      color: var(--fg-muted);
+      font-size: 12px;
+      line-height: 1.4;
+      margin-bottom: 2px;
+      transition: all 0.1s;
+    }
+    aside a:hover {
+      color: var(--fg);
+      background: var(--bg-subtle);
+      text-decoration: none;
+    }
+
+    main { min-width: 0; }
+    h1 {
+      margin: 0 0 10px;
+      font-size: 26px;
+      line-height: 1.2;
+      letter-spacing: -.03em;
+      font-weight: 700;
+      color: var(--fg);
+    }
+    h2 {
+      margin: 44px 0 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+      font-size: 18px;
+      letter-spacing: -.02em;
+      font-weight: 700;
+      color: var(--fg);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    h3 {
+      margin: 22px 0 8px;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--fg);
+    }
+    p { margin: 10px 0; color: var(--fg); font-size: 13px; }
+    .lead { color: var(--fg-muted); font-size: 14.5px; line-height: 1.6; margin-bottom: 20px; }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin: 16px 0;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+    }
+    .note {
+      padding: 12px 16px;
+      margin: 16px 0;
+      border-left: 3px solid var(--primary);
+      background: var(--primary-subtle);
+      border-radius: 0 6px 6px 0;
+      font-size: 12.5px;
+      color: var(--fg);
+    }
+    .note strong { color: var(--primary); }
+
+    pre {
+      position: relative;
+      overflow-x: auto;
+      padding: 14px 16px;
+      border-radius: 8px;
+      background: var(--code-bg);
+      color: var(--code-fg);
+      font: 12px/1.6 'Google Sans Code', ui-monospace, SFMono-Regular, Menlo, monospace;
+      margin: 12px 0 18px;
+      border: 1px solid var(--border-strong);
+    }
+    code { font: .9em 'Google Sans Code', ui-monospace, SFMono-Regular, Menlo, monospace; }
+    :not(pre) > code {
+      padding: 2px 5px;
+      border-radius: 4px;
+      background: var(--badge-bg);
+      color: var(--badge-fg);
+      font-size: 11.5px;
+      border: 1px solid var(--border);
+    }
+    .copy-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 7px;
+      font-size: 11px;
+      font-family: inherit;
+      color: #94a3b8;
+      background: rgba(255, 255, 255, 0.07);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 4px;
+      cursor: pointer;
+      opacity: 0.7;
+      transition: all 0.15s ease;
+      user-select: none;
+      z-index: 5;
+    }
+    pre:hover .copy-btn {
+      opacity: 1;
+    }
+    .copy-btn:hover {
+      color: #ffffff;
+      background: rgba(255, 255, 255, 0.16);
+      border-color: rgba(255, 255, 255, 0.3);
+    }
+    .copy-btn.copied {
+      color: #2dd4bf;
+      border-color: #2dd4bf;
+      background: rgba(45, 212, 191, 0.15);
+    }
+
+    /* METHOD BADGES */
+    .method {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-right: 6px;
+      font-family: monospace;
+      text-transform: uppercase;
+    }
+    .method.get { background: #dbeafe; color: #1e40af; }
+    .method.post { background: #dcfce7; color: #166534; }
+    .method.patch { background: #fef9c3; color: #854d0e; }
+    .method.delete { background: #fee2e2; color: #991b1b; }
+    html.dark .method.get { background: #1e3a8a; color: #93c5fd; }
+    html.dark .method.post { background: #064e3b; color: #86efac; }
+    html.dark .method.patch { background: #713f12; color: #fde047; }
+    html.dark .method.delete { background: #7f1d1d; color: #fca5a5; }
+
+    /* TABLES */
+    .table-wrap { overflow-x: auto; margin: 16px 0 20px; }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      font-size: 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: var(--bg-subtle);
+      color: var(--fg-muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 10.5px;
+      letter-spacing: .04em;
+    }
+    tbody tr:hover { background: var(--bg-subtle); }
+    tbody tr:last-child td { border-bottom: none; }
+
+    footer {
+      margin-top: 50px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+      color: var(--fg-muted);
+      font-size: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    /* RESPONSIVE */
+    @media (max-width: 840px) {
+      .layout { display: block; padding-top: 16px; }
+      aside { position: static; height: auto; padding-bottom: 16px; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
+      aside a { display: inline-block; margin-right: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- HEADER -->
+  <header>
+    <div class="top">
+      <div class="brand-wrap">
+        <a class="brand" href="/docs/">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-teal-600"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
+          NioDB
+        </a>
+        <span class="badge-pill">v0.1.0 · Agentic DB</span>
+      </div>
+      <nav class="top-nav" aria-label="Main navigation">
+        <a href="/console">Web Console</a>
+        <a href="/doc">Interactive API</a>
+        <a href="/openapi.yaml">OpenAPI YAML</a>
+        <button id="themeToggleBtn" class="theme-btn" title="Toggle Light/Dark Theme" aria-label="Toggle Theme">
+          <svg id="themeIconSun" class="hidden" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>
+          <svg id="themeIconMoon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg>
+        </button>
+      </nav>
+    </div>
+  </header>
+
+  <!-- CONTENT WRAPPER -->
+  <div class="layout">
+    <!-- SIDEBAR NAVIGATION -->
+    <aside aria-label="Table of Contents">
+      <strong>Core Setup</strong>
+      <a href="#quickstart">Quickstart & Install</a>
+      <a href="#sdks">Client SDKs (JS & Py)</a>
+      <a href="#tokens">Authentication & Tokens</a>
+
+      <strong>Data & Search</strong>
+      <a href="#records">Records & Collections</a>
+      <a href="#vectors">Vector & Semantic Search</a>
+      <a href="#sql">SQL Query Studio</a>
+      <a href="#assist">Natural Language Queries</a>
+
+      <strong>Agent & Tools</strong>
+      <!--
+      <a href="#sessions">Sessions & Memory (NioBridge)</a>
+      <a href="#tasks">Tasks & Lifecycle (Nio0)</a>
+      -->
+      <a href="#mcp">MCP & Tool Schemas</a>
+
+      <strong>Storage & Events</strong>
+      <a href="#files">Files & Blob Storage</a>
+      <a href="#events">Live SSE & Webhooks</a>
+      <a href="#users">Users & Sessions</a>
+      <a href="#vacuum">Storage Compaction (Vacuum)</a>
+      <a href="#reference">Resource Limits Table</a>
+    </aside>
+
+    <!-- MAIN BODY -->
+    <main>
+      <h1>NioDB Documentation</h1>
+      <p class="lead">The Agentic DB that works. A single-binary, ultra-lightweight database with pure-Rust SIMD vector search, multi-agent multiplexing, and natural-language query planning.</p>
+
+      <!-- SECTION 1: QUICKSTART -->
+      <h2 id="quickstart">1. Quickstart & Installation</h2>
+      <p>NioDB runs as a standalone single-binary server. Zero heavyweight dependencies, zero external database servers.</p>
+      
+      <h3>Run instantly via npx</h3>
+      <pre><code>npx @nio-labs/nio-db</code></pre>
+
+      <h3>Or build and run from source</h3>
+      <pre><code>npm install --omit=optional
+cargo build --release --locked
+node bin/niodb.cjs</code></pre>
+      
+      <p>On first launch, NioDB initializes a local data directory (default <code>./niodb</code>) and listens on <code>http://127.0.0.1:7432</code>.</p>
+      
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>CLI Flag / Option</th><th>Description</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>--dir &lt;path&gt;</code></td><td>Set custom database storage directory.</td></tr>
+            <tr><td><code>--listen &lt;ip:port&gt;</code></td><td>Override local bind address (default <code>127.0.0.1:7432</code>).</td></tr>
+            <tr><td><code>--yes</code></td><td>Accept all first-run setup defaults without prompts.</td></tr>
+            <tr><td><code>NIODB_NO_INSTALL_NIO=1</code></td><td>Skip automatic Nio CLI installation.</td></tr>
+            <tr><td><code>NIODB_CORS_ORIGINS</code></td><td>Comma-separated list of allowed CORS origins.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- SECTION 2: CLIENT SDKS -->
+      <h2 id="sdks">2. Client SDKs</h2>
+      <p>NioDB provides zero-dependency, ultra-lightweight client SDKs for JavaScript/TypeScript and Python.</p>
+
+      <h3>JavaScript / TypeScript (<code>nio-db.js</code>)</h3>
+      <pre><code>npm install nio-db.js</code></pre>
+      
+      <h4>Standard JSON Document Operations (Non-Vector)</h4>
+      <pre><code>import { createNioDB } from "nio-db.js";
+
+// Initialize with client-token and secret-token combination (or direct token)
+const db = createNioDB({ 
+  url: "http://127.0.0.1:7432", 
+  clientToken: "niodb_client_...",
+  secretToken: "niodb_secret_..." 
+});
+const users = db.collection("users");
+
+// 1. Insert Document (with optional TTL in seconds)
+const user = await users.insert({ name: "Alex Rivera", role: "admin", status: "active" }, { ttl: 86400 });
+
+// 2. Read & List with Pagination
+const profile = await users.get(user.id);
+const page = await users.find({ limit: 25 });
+
+// 3. Update / Patch Document
+await users.update(user.id, { role: "superadmin", last_login: Date.now() });
+
+// 4. Bulk Operations (Insert, Update, Delete)
+await users.insertMany([
+  { name: "Beatrix", role: "developer" },
+  { name: "Carlos", role: "analyst" }
+]);
+await users.updateMany([{ id: "art_1", status: "verified" }]);
+await users.deleteMany(["art_2", "art_3"]);
+
+// 5. Delete Document
+await users.delete(user.id);
+
+// 6. SQL Query Studio
+const { items } = await db.query("SELECT * FROM users WHERE role = 'admin'");</code></pre>
+
+      <h4>Vector & Semantic Search (Optional)</h4>
+      <pre><code>// Pure-Rust SIMD Cosine Distance Vector Search (No external vector DB needed)
+const knowledge = db.collection("knowledge_base");
+await knowledge.insert({
+  text: "High-performance vector embeddings",
+  embedding: [0.082, 0.491, 0.122, 0.941]
+});
+
+const matches = await knowledge.searchVector({
+  vector: [0.082, 0.491, 0.122, 0.941],
+  topK: 5,
+  minScore: 0.75
+});</code></pre>
+
+      <h3>Python (<code>nio-db-py</code>)</h3>
+      <pre><code>pip install nio-db-py</code></pre>
+
+      <h4>Standard JSON Document Operations (Non-Vector)</h4>
+      <pre><code>from niodb import NioDB
+
+# Initialize with client_token and secret_token combination (or direct token)
+db = NioDB(
+    "http://127.0.0.1:7432", 
+    client_token="niodb_client_...", 
+    secret_token="niodb_secret_..."
+)
+users = db.collection("users")
+
+# 1. Insert Document
+user = users.insert({"name": "Alex Rivera", "role": "admin", "status": "active"}, ttl=86400)
+
+# 2. Read & List
+profile = users.get(user["id"])
+page = users.find(limit=25)
+
+# 3. Update Document
+users.update(user["id"], {"role": "superadmin"})
+
+# 4. Bulk Operations
+users.insert_many([
+    {"name": "Beatrix", "role": "developer"},
+    {"name": "Carlos", "role": "analyst"}
+])
+users.update_many([{"id": "art_1", "status": "verified"}])
+users.delete_many(["art_2", "art_3"])
+
+# 5. Delete Document
+users.delete(user["id"])
+
+# 6. SQL Query Studio
+results = db.query("SELECT * FROM users WHERE role = 'admin'")</code></pre>
+
+      <h4>Vector & Semantic Search (Optional)</h4>
+      <pre><code># Pure-Rust SIMD Cosine Distance Vector Search
+knowledge = db.collection("knowledge_base")
+knowledge.insert({
+    "text": "High-performance vector embeddings",
+    "embedding": [0.082, 0.491, 0.122, 0.941]
+})
+
+matches = knowledge.search_vector(
+    vector=[0.082, 0.491, 0.122, 0.941],
+    top_k=5,
+    min_score=0.75
+)</code></pre>
+
+      <!-- SECTION 3: AUTHENTICATION -->
+      <h2 id="tokens">3. Authentication & Tokens</h2>
+      <p>NioDB uses standard Bearer tokens for all protected HTTP endpoints.</p>
+      <p>During initial setup, two secure credentials are created in your data directory: <code>client-token</code> and <code>secret-token</code>. Bearer authentication supports combining both credentials (<code>&lt;client-token&gt;:&lt;secret-token&gt;</code>) or using your client token directly.</p>
+      <pre><code>CLIENT_TOKEN=$(cat ./niodb/client-token)
+SECRET_TOKEN=$(cat ./niodb/secret-token)
+NIODB_TOKEN="${CLIENT_TOKEN}:${SECRET_TOKEN}"
+
+curl http://127.0.0.1:7432/api/v1/status \
+  -H "Authorization: Bearer $NIODB_TOKEN"</code></pre>
+      <div class="note"><strong>Security Tip:</strong> Combining <code>client-token:secret-token</code> verifies both public client identity and private signing authority. For client web/mobile applications, register end users via <code>POST /auth/register</code> and use scoped session tokens from <code>POST /auth/login</code>.</div>
+
+      <!-- SECTION 4: RECORDS & CRUD OPERATIONS -->
+      <h2 id="records">4. Records, CRUD & Bulk Operations</h2>
+      <p>A <strong>record</strong> is a JSON document stored in an append-only collection. NioDB assigns unique IDs, revisions, timestamps, and verifies SHA-256 integrity. Full CRUD and bulk batch operations are supported.</p>
+
+      <h3><span class="method post">POST</span> /api/v1/records — Insert Record</h3>
+      <pre><code>curl -X POST http://127.0.0.1:7432/api/v1/records \
+  -H "Authorization: Bearer $NIODB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: task-create-001" \
+  -d '{
+    "collection": "tasks",
+    "data": {
+      "title": "Review release build",
+      "priority": "high",
+      "ttl": 3600
+    }
+  }'</code></pre>
+
+      <h3><span class="method get">GET</span> /api/v1/records/:id — Read Record</h3>
+      <pre><code>curl http://127.0.0.1:7432/api/v1/records/art_123 \
+  -H "Authorization: Bearer $NIODB_TOKEN"</code></pre>
+
+      <h3><span class="method patch">PATCH</span> /api/v1/records/:id — Update Record</h3>
+      <p>Atomically updates and merges record data, incrementing the revision counter.</p>
+      <pre><code>curl -X PATCH http://127.0.0.1:7432/api/v1/records/art_123 \
+  -H "Authorization: Bearer $NIODB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "data": {
+      "priority": "urgent",
+      "status": "in_progress"
+    }
+  }'</code></pre>
+
+      <h3><span class="method delete">DELETE</span> /api/v1/records/:id — Delete Record</h3>
+      <p>Appends a tombstone deletion event to the journal, removes from in-memory index, and cleans the artifact projection.</p>
+      <pre><code>curl -X DELETE http://127.0.0.1:7432/api/v1/records/art_123 \
+  -H "Authorization: Bearer $NIODB_TOKEN"</code></pre>
+
+      <h3><span class="method post">POST</span> /api/v1/records/bulk — Bulk Operations (Batch)</h3>
+      <p>Perform high-throughput bulk inserts, updates, and deletes in a single request.</p>
+
+      <div class="card">
+        <h4 style="margin-top:0;">1. Bulk Insert:</h4>
+        <pre><code>curl -X POST http://127.0.0.1:7432/api/v1/records/bulk \
+  -H "Authorization: Bearer $NIODB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "collection": "tasks",
+    "action": "insert",
+    "records": [
+      { "title": "Index vector embeddings", "status": "pending" },
+      { "title": "Run storage compaction", "status": "pending" }
+    ]
+  }'</code></pre>
+
+        <h4>2. Bulk Update:</h4>
+        <pre><code>curl -X POST http://127.0.0.1:7432/api/v1/records/bulk \
+  -H "Authorization: Bearer $NIODB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "update",
+    "records": [
+      { "id": "art_1", "data": { "status": "completed" } },
+      { "id": "art_2", "data": { "status": "completed" } }
+    ]
+  }'</code></pre>
+
+        <h4>3. Bulk Delete:</h4>
+        <pre><code>curl -X POST http://127.0.0.1:7432/api/v1/records/bulk \
+  -H "Authorization: Bearer $NIODB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "delete",
+    "ids": ["art_1", "art_2"]
+  }'</code></pre>
+      </div>
+
+      <h3><span class="method get">GET</span> /api/v1/records — List & Pagination</h3>
+      <pre><code>curl "http://127.0.0.1:7432/api/v1/records?collection=tasks&amp;limit=50" \
+  -H "Authorization: Bearer $NIODB_TOKEN"</code></pre>
+      <p>List requests support page limits from 1 up to <strong>1,000 records</strong> per request, using cursor-based pagination.</p>
+
+      <!-- SECTION 5: VECTOR SEARCH -->
+      <h2 id="vectors">5. Vector & Semantic Search</h2>
+      <p>NioDB features a native, pure-Rust SIMD-friendly vector similarity engine. No external vector database or C++ dependencies required.</p>
+      
+      <h3><span class="method post">POST</span> /api/v1/records/search — SIMD Vector Search</h3>
+      <pre><code>curl -X POST http://127.0.0.1:7432/api/v1/records/search \
+  -H "Authorization: Bearer $NIODB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "collection": "embeddings",
+    "vector": [0.082, 0.491, 0.122, 0.941],
+    "top_k": 5,
+    "min_score": 0.75
+  }'</code></pre>
+
+      <div class="card">
+        <h4 style="margin-top:0;">Vector Search Response:</h4>
+        <pre><code>{
+  "items": [
+    {
+      "id": "art_9f4bc1a8",
+      "collection": "embeddings",
+      "score": 0.9842,
+      "data": {
+        "text": "Autonomous Agent Loop",
+        "embedding": [0.081, 0.493, 0.120, 0.939]
+      }
+    }
+  ],
+  "count": 1
+}</code></pre>
+      </div>
+
+      <!-- SECTION 6: SQL STUDIO -->
+      <h2 id="sql">6. SQL Query Studio (AlaSQL Engine)</h2>
+      <p>Run safe, restricted, parameterized SQL queries across your collections. Collections automatically act as SQL tables with top-level JSON fields exposed as queryable columns.</p>
+
+      <h3><span class="method post">POST</span> /api/v1/query — Execute SQL</h3>
+      <pre><code>curl -X POST http://127.0.0.1:7432/api/v1/query \
+  -H "Authorization: Bearer $NIODB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sql": "SELECT id, title, status FROM tasks WHERE status = ? ORDER BY id DESC LIMIT 50",
+    "parameters": ["pending"]
+  }'</code></pre>
+
+      <!-- SECTION 7: NIO ASSIST -->
+      <h2 id="assist">7. Natural Language Queries (Ask Nio)</h2>
+      <p>Ask natural-language questions about stored data. Nio formulates bounded read plans, executes authorized queries, and provides grounded answers.</p>
+
+      <h3><span class="method post">POST</span> /api/v1/assist — Natural Query</h3>
+      <pre><code>curl -X POST http://127.0.0.1:7432/api/v1/assist \
+  -H "Authorization: Bearer $NIODB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "How many tasks are currently pending in our database?"}'</code></pre>
+
+      <!-- SECTION 8 & 9 (COMMENTED OUT)
+      <h2 id="sessions">8. Multi-Agent Multiplexing (NioBridge)</h2>
+      <p>Designed specifically to coordinate multiple agents working on complex tasks without losing context or looping into dead ends.</p>
+
+      <h3><span class="method post">POST</span> /api/v1/sessions — Create Multi-Agent Session</h3>
+      <pre><code>curl -X POST http://127.0.0.1:7432/api/v1/sessions \
+  -H "Authorization: Bearer $NIODB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Database Refactoring Session",
+    "goal": "Optimize query indexes and compact journal",
+    "model_tier": "strong"
+  }'</code></pre>
+
+      <h3><span class="method post">POST</span> /api/v1/sessions/:id/turns — Append Agent Turn</h3>
+      <pre><code>curl -X POST http://127.0.0.1:7432/api/v1/sessions/sess_123/turns \
+  -H "Authorization: Bearer $NIODB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent": "coder-agent",
+    "model": "claude-3-7-sonnet",
+    "summary": "Implemented atomic compaction in storage engine",
+    "files_touched": ["src/storage.rs"],
+    "cost_usd": 0.012
+  }'</code></pre>
+
+      <h3><span class="method get">GET</span> /api/v1/sessions/:id/manifest — Lean Context Manifest</h3>
+      <p>Generates a lean, token-efficient markdown manifest summarizing the entire session state and preventing repetitive LLM context inflation.</p>
+
+      <h3><span class="method post">POST</span> /api/v1/sessions/:id/dead-ends — Log Dead End (Prevent Agent Loops)</h3>
+      <pre><code>curl -X POST http://127.0.0.1:7432/api/v1/sessions/sess_123/dead-ends \
+  -H "Authorization: Bearer $NIODB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "hypothesis": "Use SQLite external C bindings",
+    "reason": "Violates single-binary pure-Rust lightweight constraint",
+    "agent": "researcher"
+  }'</code></pre>
+
+      <h2 id="tasks">9. Workflow Automation & Tasks (Nio0)</h2>
+      <p>Track background task lifecycles, execution logs, and subscribe to real-time execution streams via SSE.</p>
+
+      <h3><span class="method post">POST</span> /api/v1/tasks — Create Task</h3>
+      <pre><code>curl -X POST http://127.0.0.1:7432/api/v1/tasks \
+  -H "Authorization: Bearer $NIODB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Nightly Data Migration",
+    "prompt": "Extract records, compute embeddings, and vacuum journal",
+    "priority": "normal"
+  }'</code></pre>
+
+      <h3><span class="method get">GET</span> /api/v1/tasks/:id/stream — Live Task SSE Stream</h3>
+      <pre><code>curl -N http://127.0.0.1:7432/api/v1/tasks/task_123/stream \
+  -H "Authorization: Bearer $NIODB_TOKEN"</code></pre>
+      -->
+
+      <!-- SECTION 10: MCP & AGENT TOOLS -->
+      <h2 id="mcp">10. Model Context Protocol (MCP) & Agent Tools</h2>
+      <p>NioDB natively speaks the JSON-RPC Model Context Protocol (MCP) and exports standardized tool-calling schemas for OpenAI, Anthropic, and LangChain.</p>
+      
+      <h3><span class="method post">POST</span> /mcp — Standard MCP JSON-RPC</h3>
+      <pre><code>curl -X POST http://127.0.0.1:7432/mcp \
+  -H "Authorization: Bearer $NIODB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}'</code></pre>
+
+      <h3><span class="method get">GET</span> /api/v1/agent/tools — Export Agent Schemas</h3>
+      <pre><code>curl http://127.0.0.1:7432/api/v1/agent/tools \
+  -H "Authorization: Bearer $NIODB_TOKEN"</code></pre>
+
+      <!-- SECTION 11: FILES & STORAGE -->
+      <h2 id="files">11. Files & Blob Storage</h2>
+      <p>Store assets, PDFs, images, and binary attachments in isolated buckets with automatic deduplication.</p>
+
+      <h3><span class="method post">POST</span> /api/v1/storage/:bucket/upload — Upload File</h3>
+      <pre><code>curl -X POST http://127.0.0.1:7432/api/v1/storage/documents/upload \
+  -H "Authorization: Bearer $NIODB_TOKEN" \
+  -F "file=@./document.pdf"</code></pre>
+
+      <h3><span class="method get">GET</span> /api/v1/storage/:bucket/:id — Download File</h3>
+      <pre><code>curl http://127.0.0.1:7432/api/v1/storage/documents/fil_123 \
+  -H "Authorization: Bearer $NIODB_TOKEN" -o output.pdf</code></pre>
+
+      <!-- SECTION 12: EVENTS & WEBHOOKS -->
+      <h2 id="events">12. Live Events, SSE & Webhooks</h2>
+      <p>Publish real-time events to connected clients via Server-Sent Events (SSE) and deliver HMAC-SHA256 signed webhooks.</p>
+
+      <h3><span class="method post">POST</span> /api/v1/events — Publish Event</h3>
+      <pre><code>curl -X POST http://127.0.0.1:7432/api/v1/events \
+  -H "Authorization: Bearer $NIODB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "record.created", "data": {"record_id": "art_123"}}'</code></pre>
+
+      <h3><span class="method get">GET</span> /api/v1/events/stream — SSE Event Stream</h3>
+      <pre><code>curl -N "http://127.0.0.1:7432/api/v1/events/stream?name=*" \
+  -H "Authorization: Bearer $NIODB_TOKEN"</code></pre>
+
+      <!-- SECTION 13: USERS & SESSIONS -->
+      <h2 id="users">13. User Accounts & Session Tokens</h2>
+      <p>Built-in user directory with salted PBKDF2 password hashing and 7-day bearer session tokens.</p>
+
+      <h3>Register & Login</h3>
+      <pre><code># 1. Register user (Backend token required)
+curl -X POST http://127.0.0.1:7432/auth/register \
+  -H "Authorization: Bearer $NIODB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"username": "developer", "password": "SuperSecretPassword123"}'
+
+# 2. Login from client (Returns access_token)
+curl -X POST http://127.0.0.1:7432/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "developer", "password": "SuperSecretPassword123"}'</code></pre>
+
+      <!-- SECTION 14: VACUUM & COMPACTION -->
+      <h2 id="vacuum">14. Storage Compaction & Maintenance (Vacuum)</h2>
+      <p>NioDB provides zero-downtime atomic journal compaction to reclaim disk space, remove expired TTL records, and clean deleted files.</p>
+
+      <h3><span class="method post">POST</span> /api/v1/admin/vacuum — Trigger Vacuum</h3>
+      <pre><code>curl -X POST http://127.0.0.1:7432/api/v1/admin/vacuum \
+  -H "Authorization: Bearer $NIODB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{}'</code></pre>
+      
+      <div class="card">
+        <h4 style="margin-top:0;">Vacuum Response:</h4>
+        <pre><code>{
+  "success": true,
+  "stats": {
+    "initial_bytes": 14285820,
+    "compacted_bytes": 2840120,
+    "active_artifacts": 1250,
+    "active_users": 15,
+    "active_files": 48,
+    "purged_expired": 320
+  }
+}</code></pre>
+      </div>
+
+      <!-- SECTION 15: RESOURCE LIMITS -->
+      <h2 id="reference">15. Resource Limits & Capacities</h2>
+      <p>NioDB offers generous resource limits while maintaining sub-millisecond local in-memory execution and minimal disk footprint.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Resource</th>
+              <th>Supported Limit</th>
+              <th>Details</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Records Capacity</strong></td>
+              <td><strong>Millions of records</strong> (16 MiB per record, 64 GiB+ journal)</td>
+              <td>Unbounded in-memory pure-Rust BTree indexing with in-place zero-downtime atomic vacuum compaction.</td>
+            </tr>
+            <tr>
+              <td><strong>Pagination</strong></td>
+              <td>Up to 1,000 items per page</td>
+              <td>Fast cursor-based pagination across all collection and file list endpoints.</td>
+            </tr>
+            <tr>
+              <td><strong>Vector Embeddings</strong></td>
+              <td>SIMD Cosine Distance (Arbitrary dimensions)</td>
+              <td>Sub-millisecond pure-Rust dot product search over vector embeddings with zero external C++ vector DBs.</td>
+            </tr>
+            <tr>
+              <td><strong>SQL Queries</strong></td>
+              <td>64 KiB input, 1,000 output rows, 15s timeout</td>
+              <td>Restricted read-only SQL with 64 MiB query execution buffer powered by bundled AlaSQL engine.</td>
+            </tr>
+            <tr>
+              <td><strong>Nio Natural Query</strong></td>
+              <td>4 concurrent requests, 60s default timeout (1–300s)</td>
+              <td>Bounded natural language query planning via Nio CLI.</td>
+            </tr>
+            <tr>
+              <td><strong>Files & Blobs</strong></td>
+              <td>64 MiB per file, 100 GiB per workspace, 1,000,000 files</td>
+              <td>Content-addressable storage with SHA-256 deduplication and Range request support.</td>
+            </tr>
+            <tr>
+              <td><strong>Users & Sessions</strong></td>
+              <td>100,000 users, 1,000,000 active sessions</td>
+              <td>Salted PBKDF2 hashing, 7-day bearer sessions with instant revocation across restarts.</td>
+            </tr>
+            <tr>
+              <td><strong>Live Events</strong></td>
+              <td>64 KiB payload, 100/sec, 1,024-event buffer</td>
+              <td>Server-Sent Events (SSE) broadcast channel with gap detection.</td>
+            </tr>
+            <tr>
+              <td><strong>Webhooks & Workers</strong></td>
+              <td>64 webhooks, 64 TypeScript workers</td>
+              <td>HMAC-SHA256 signed deliveries and isolated Node worker processes.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- FOOTER -->
+      <footer>
+        <div>NioDB Documentation · Served directly by the local database engine.</div>
+        <div><a href="/console">Open Web Console →</a></div>
+      </footer>
+    </main>
+  </div>
+
+  <script>
+    // Theme Switcher (Light mode by default)
+    const toggleBtn = document.getElementById("themeToggleBtn");
+    const sunIcon = document.getElementById("themeIconSun");
+    const moonIcon = document.getElementById("themeIconMoon");
+    
+    // Check saved theme or default to light
+    const currentTheme = localStorage.getItem("niodb_theme") || "light";
+    applyTheme(currentTheme);
+
+    function applyTheme(theme) {
+      if (theme === "dark") {
+        document.documentElement.classList.add("dark");
+        document.documentElement.classList.remove("light");
+        sunIcon.classList.remove("hidden");
+        moonIcon.classList.add("hidden");
+      } else {
+        document.documentElement.classList.remove("dark");
+        document.documentElement.classList.add("light");
+        sunIcon.classList.add("hidden");
+        moonIcon.classList.remove("hidden");
+      }
+      localStorage.setItem("niodb_theme", theme);
+    }
+
+    toggleBtn.addEventListener("click", () => {
+      const isDark = document.documentElement.classList.contains("dark");
+      applyTheme(isDark ? "light" : "dark");
+    });
+
+    // Code Block Copy Button
+    const copyIconSvg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
+    const checkIconSvg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+
+    document.querySelectorAll("pre").forEach((pre) => {
+      const btn = document.createElement("button");
+      btn.className = "copy-btn";
+      btn.type = "button";
+      btn.setAttribute("aria-label", "Copy code to clipboard");
+      btn.innerHTML = `${copyIconSvg}<span>Copy</span>`;
+
+      btn.addEventListener("click", async () => {
+        const codeEl = pre.querySelector("code");
+        const text = codeEl ? codeEl.innerText : pre.innerText;
+        try {
+          await navigator.clipboard.writeText(text);
+          btn.classList.add("copied");
+          btn.innerHTML = `${checkIconSvg}<span>Copied!</span>`;
+          setTimeout(() => {
+            btn.classList.remove("copied");
+            btn.innerHTML = `${copyIconSvg}<span>Copy</span>`;
+          }, 2000);
+        } catch (e) {
+          // Fallback if clipboard API fails
+          const textarea = document.createElement("textarea");
+          textarea.value = text;
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand("copy");
+          document.body.removeChild(textarea);
+          btn.classList.add("copied");
+          btn.innerHTML = `${checkIconSvg}<span>Copied!</span>`;
+          setTimeout(() => {
+            btn.classList.remove("copied");
+            btn.innerHTML = `${copyIconSvg}<span>Copy</span>`;
+          }, 2000);
+        }
+      });
+
+      pre.appendChild(btn);
+    });
+  </script>
+</body>
+</html>

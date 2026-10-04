@@ -1,0 +1,22 @@
+{
+  "name": "nio-db.js",
+  "version": "0.1.0",
+  "description": "Ultra-lightweight JavaScript and TypeScript client for NioDB — the Agentic Database.",
+  "main": "index.js",
+  "module": "index.js",
+  "types": "index.d.ts",
+  "keywords": [
+    "niodb",
+    "database",
+    "agentic-db",
+    "vector-search",
+    "ai-agents",
+    "sqlite",
+    "lightweight"
+  ],
+  "author": "Nio Labs",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}

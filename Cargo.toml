@@ -1,0 +1,32 @@
+[package]
+name = "niodb"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+description = "Standalone file-based database server with Nio CLI assistance"
+publish = false
+
+[dependencies]
+axum = { version = "0.7.9", features = ["multipart"] }
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+hmac = "0.12"
+pbkdf2 = { version = "0.11", default-features = false }
+subtle = "2.6"
+mime = "0.3"
+futures-util = "0.3"
+tokio-util = { version = "0.7", features = ["io"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "process", "io-util", "time", "fs"] }
+reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+
+[profile.release]
+opt-level = "s"
+lto = "thin"
+strip = true

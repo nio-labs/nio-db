@@ -1,0 +1,3841 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NioDB Console</title>
+  <!-- Google Fonts: Google Sans Code -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Google+Sans+Code:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Vue 3 CDN -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <!-- sql.js SQLite WebAssembly CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/sql-wasm.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            border: "hsl(var(--border))",
+            input: "hsl(var(--input))",
+            ring: "hsl(var(--ring))",
+            background: "hsl(var(--background))",
+            foreground: "hsl(var(--foreground))",
+            primary: {
+              DEFAULT: "hsl(var(--primary))",
+              foreground: "hsl(var(--primary-foreground))",
+            },
+            secondary: {
+              DEFAULT: "hsl(var(--secondary))",
+              foreground: "hsl(var(--secondary-foreground))",
+            },
+            destructive: {
+              DEFAULT: "hsl(var(--destructive))",
+              foreground: "hsl(var(--destructive-foreground))",
+            },
+            muted: {
+              DEFAULT: "hsl(var(--muted))",
+              foreground: "hsl(var(--muted-foreground))",
+            },
+            accent: {
+              DEFAULT: "hsl(var(--accent))",
+              foreground: "hsl(var(--accent-foreground))",
+            },
+            card: {
+              DEFAULT: "hsl(var(--card))",
+              foreground: "hsl(var(--card-foreground))",
+            },
+            popover: {
+              DEFAULT: "hsl(var(--popover))",
+              foreground: "hsl(var(--popover-foreground))",
+            },
+          },
+          borderRadius: {
+            lg: "var(--radius)",
+            md: "calc(var(--radius) - 2px)",
+            sm: "calc(var(--radius) - 4px)",
+          },
+          fontFamily: {
+            sans: ["'Google Sans Code'", "ui-monospace", "monospace"],
+            mono: ["'Google Sans Code'", "ui-monospace", "monospace"],
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    :root {
+      /* Shadcn Light Theme (Unified Teal) */
+      --background: 0 0% 100%;
+      --foreground: 222.2 84% 4.9%;
+      --card: 0 0% 100%;
+      --card-foreground: 222.2 84% 4.9%;
+      --popover: 0 0% 100%;
+      --popover-foreground: 222.2 84% 4.9%;
+      --primary: 173.4 80.4% 36%;
+      --primary-foreground: 0 0% 100%;
+      --secondary: 174 25% 96%;
+      --secondary-foreground: 174 80% 20%;
+      --muted: 210 40% 96.1%;
+      --muted-foreground: 215.4 16.3% 46.9%;
+      --accent: 174 25% 95%;
+      --accent-foreground: 174 80% 20%;
+      --destructive: 0 84.2% 60.2%;
+      --destructive-foreground: 210 40% 98%;
+      --border: 214.3 31.8% 91.4%;
+      --input: 214.3 31.8% 91.4%;
+      --ring: 173.4 80.4% 36%;
+      --radius: 0.5rem;
+    }
+    .dark {
+      /* Shadcn Dark Theme (Unified Teal) */
+      --background: 224 71% 4%;
+      --foreground: 213 31% 91%;
+      --card: 224 71% 4%;
+      --card-foreground: 213 31% 91%;
+      --popover: 224 71% 4%;
+      --popover-foreground: 213 31% 91%;
+      --primary: 173.4 80.4% 45%;
+      --primary-foreground: 224 71% 4%;
+      --secondary: 174 30% 12%;
+      --secondary-foreground: 174 80% 90%;
+      --muted: 217.2 32.6% 17.5%;
+      --muted-foreground: 215 20.2% 65.1%;
+      --accent: 174 30% 14%;
+      --accent-foreground: 174 80% 90%;
+      --destructive: 0 62.8% 30.6%;
+      --destructive-foreground: 210 40% 98%;
+      --border: 217.2 32.6% 17.5%;
+      --input: 217.2 32.6% 17.5%;
+      --ring: 173.4 80.4% 45%;
+    }
+    * {
+      font-family: 'Google Sans Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+    body {
+      background-color: hsl(var(--background));
+      color: hsl(var(--foreground));
+      font-feature-settings: "rlig" 1, "calt" 1;
+    }
+    /* Scrollbars */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: hsl(var(--muted-foreground) / 0.25); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / 0.45); }
+    [v-cloak] { display: none !important; }
+  </style>
+</head>
+<body class="h-screen w-screen overflow-hidden flex flex-col antialiased">
+  <div id="app" v-cloak class="h-full w-full flex overflow-hidden">
+    <!-- SHADCN SIDEBAR -->
+    <aside class="w-56 border-r border-border bg-card flex flex-col flex-shrink-0 z-20">
+      <!-- Brand Logo -->
+      <div class="h-12 px-4 border-b border-border flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <div class="w-6 h-6 rounded-md bg-primary flex items-center justify-center text-primary-foreground font-bold text-[11px] shadow-sm">
+            N
+          </div>
+          <span class="font-semibold text-xs tracking-tight text-foreground">NioDB</span>
+          <span class="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-primary/10 text-primary border border-primary/20">
+            CONSOLE
+          </span>
+        </div>
+      </div>
+
+      <!-- Navigation Links -->
+      <nav class="flex-1 px-2.5 py-3 space-y-0.5 overflow-y-auto">
+        <button 
+          @click="activeNav = 'data'" 
+          :class="[
+            'w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all text-left',
+            activeNav === 'data' 
+              ? 'bg-teal-500/15 text-teal-800 dark:text-teal-200 font-semibold shadow-sm' 
+              : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+          ]"
+        >
+          <icon name="database" class="w-3.5 h-3.5 text-teal-600 dark:text-teal-400"></icon>
+          <span>Data & Query</span>
+        </button>
+
+        <button 
+          @click="activeNav = 'files'" 
+          :class="[
+            'w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all text-left',
+            activeNav === 'files' 
+              ? 'bg-teal-500/15 text-teal-800 dark:text-teal-200 font-semibold shadow-sm' 
+              : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+          ]"
+        >
+          <icon name="folder" class="w-3.5 h-3.5 text-teal-600 dark:text-teal-400"></icon>
+          <span>Files & Storage</span>
+        </button>
+
+        <button 
+          @click="activeNav = 'events'" 
+          :class="[
+            'w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all text-left',
+            activeNav === 'events' 
+              ? 'bg-teal-500/15 text-teal-800 dark:text-teal-200 font-semibold shadow-sm' 
+              : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+          ]"
+        >
+          <icon name="zap" class="w-3.5 h-3.5 text-teal-600 dark:text-teal-400"></icon>
+          <span>Events & Webhook</span>
+        </button>
+
+        <button 
+          @click="activeNav = 'auth'" 
+          :class="[
+            'w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all text-left',
+            activeNav === 'auth' 
+              ? 'bg-teal-500/15 text-teal-800 dark:text-teal-200 font-semibold shadow-sm' 
+              : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+          ]"
+        >
+          <icon name="users" class="w-3.5 h-3.5 text-teal-600 dark:text-teal-400"></icon>
+          <span>Auth & Users</span>
+        </button>
+
+        <button 
+          @click="activeNav = 'settings'" 
+          :class="[
+            'w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all text-left',
+            activeNav === 'settings' 
+              ? 'bg-teal-500/15 text-teal-800 dark:text-teal-200 font-semibold shadow-sm' 
+              : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+          ]"
+        >
+          <icon name="settings" class="w-3.5 h-3.5 text-teal-600 dark:text-teal-400"></icon>
+          <span>Config & Status</span>
+        </button>
+      </nav>
+
+      <!-- Sidebar Footer -->
+      <div class="p-2.5 border-t border-border flex flex-col gap-1.5 bg-card">
+        <div class="flex items-center justify-between text-[11px] px-1.5 py-0.5 text-muted-foreground">
+          <div class="flex items-center gap-1.5">
+            <span class="relative flex h-1.5 w-1.5">
+              <span v-if="serverOnline" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75"></span>
+              <span :class="['relative inline-flex rounded-full h-1.5 w-1.5', serverOnline ? 'bg-teal-500' : 'bg-destructive']"></span>
+            </span>
+            <span>{{ serverOnline ? 'Server Ready' : 'Server Offline' }}</span>
+          </div>
+          <span class="text-[10px] font-mono text-muted-foreground">v0.1.0</span>
+        </div>
+
+        <div class="flex items-center justify-between text-[11px] px-1.5 pt-1 border-t border-border/50 text-muted-foreground">
+          <a href="/doc" target="_blank" class="hover:text-primary transition-colors flex items-center gap-1">
+            <icon name="file-code" class="w-3 h-3"></icon> API Docs
+          </a>
+          <a href="/docs/" target="_blank" class="hover:text-primary transition-colors flex items-center gap-1">
+            <icon name="book-open" class="w-3 h-3"></icon> Guides
+          </a>
+        </div>
+      </div>
+    </aside>
+
+    <!-- MAIN WRAPPER -->
+    <div class="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-background">
+      <!-- SHADCN TOP HEADER -->
+      <header class="h-12 border-b border-border bg-card/70 backdrop-blur px-5 flex items-center justify-between flex-shrink-0 z-10">
+        <div class="flex items-center gap-2.5">
+          <h2 class="text-xs font-semibold tracking-tight text-foreground">
+            {{ navTitles[activeNav] }}
+          </h2>
+        </div>
+
+        <!-- Right action badges & Bearer Token status -->
+        <div class="flex items-center gap-2.5">
+          <!-- Light / Dark Mode Toggle -->
+          <button 
+            @click="toggleTheme()" 
+            class="inline-flex items-center justify-center rounded-md text-xs font-medium border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-7 w-7 transition-colors"
+            :title="isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'"
+          >
+            <icon v-if="isDark" name="sun" class="w-3.5 h-3.5 text-amber-500"></icon>
+            <icon v-else name="moon" class="w-3.5 h-3.5 text-slate-700"></icon>
+          </button>
+
+          <div 
+            @click="tokenModalOpen = true"
+            class="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-border bg-secondary text-[11px] font-medium cursor-pointer hover:border-primary/50 transition-all shadow-sm"
+          >
+            <span :class="['w-1.5 h-1.5 rounded-full', token ? 'bg-emerald-500' : 'bg-amber-500']"></span>
+            <span class="text-muted-foreground font-mono">
+              {{ token ? (token.startsWith('nio_session_') ? 'Session: ' + token.slice(0, 14) + '...' : (token.includes(':') || token.includes('.') ? 'Bearer: client + secret' : 'Bearer: configured')) : 'No Token Configured' }}
+            </span>
+          </div>
+
+          <button 
+            @click="tokenModalOpen = true"
+            class="inline-flex items-center justify-center rounded-md text-[11px] font-medium border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-7 px-2.5 transition-colors text-foreground"
+          >
+            <icon name="key" class="w-3 h-3 mr-1.5"></icon>
+            Set Token
+          </button>
+        </div>
+      </header>
+
+      <!-- CONTENT BODY -->
+      <main class="flex-1 p-5 overflow-y-auto">
+        <!-- =================== VIEW 1: DATA & QUERY =================== -->
+        <div v-if="activeNav === 'data'" class="space-y-4">
+          <!-- Shadcn Tabs List -->
+          <div class="inline-flex h-8 items-center justify-center rounded-lg bg-muted p-0.5 text-muted-foreground border border-border flex-wrap">
+            <button 
+              @click="activeDataTab = 'browser'"
+              :class="[
+                'inline-flex items-center justify-center whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-medium ring-offset-background transition-all',
+                activeDataTab === 'browser' ? 'bg-background text-foreground shadow-sm font-semibold' : 'hover:text-foreground'
+              ]"
+            >
+              <icon name="table" class="w-3 h-3 mr-1.5"></icon>
+              Records Grid
+            </button>
+            <button 
+              @click="activeDataTab = 'vector'"
+              :class="[
+                'inline-flex items-center justify-center whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-medium ring-offset-background transition-all',
+                activeDataTab === 'vector' ? 'bg-background text-foreground shadow-sm font-semibold' : 'hover:text-foreground'
+              ]"
+            >
+              <icon name="target" class="w-3 h-3 mr-1.5"></icon>
+              Vector Search
+            </button>
+            <!--
+            <button 
+              @click="activeDataTab = 'sessions'; loadSessions();"
+              :class="[
+                'inline-flex items-center justify-center whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-medium ring-offset-background transition-all',
+                activeDataTab === 'sessions' ? 'bg-background text-foreground shadow-sm font-semibold' : 'hover:text-foreground'
+              ]"
+            >
+              <icon name="history" class="w-3 h-3 mr-1.5"></icon>
+              Agent Sessions
+            </button>
+            <button 
+              @click="activeDataTab = 'tasks'; loadTasks();"
+              :class="[
+                'inline-flex items-center justify-center whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-medium ring-offset-background transition-all',
+                activeDataTab === 'tasks' ? 'bg-background text-foreground shadow-sm font-semibold' : 'hover:text-foreground'
+              ]"
+            >
+              <icon name="list-todo" class="w-3 h-3 mr-1.5"></icon>
+              Agent Tasks
+            </button>
+            -->
+            <button 
+              @click="activeDataTab = 'sql'"
+              :class="[
+                'inline-flex items-center justify-center whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-medium ring-offset-background transition-all',
+                activeDataTab === 'sql' ? 'bg-background text-foreground shadow-sm font-semibold' : 'hover:text-foreground'
+              ]"
+            >
+              <icon name="terminal" class="w-3 h-3 mr-1.5"></icon>
+              SQL Studio
+            </button>
+            <button 
+              @click="activeDataTab = 'human'"
+              :class="[
+                'inline-flex items-center justify-center whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-medium ring-offset-background transition-all',
+                activeDataTab === 'human' ? 'bg-background text-foreground shadow-sm font-semibold' : 'hover:text-foreground'
+              ]"
+            >
+              <icon name="bot" class="w-3 h-3 mr-1.5"></icon>
+              Natural Query
+            </button>
+          </div>
+
+          <!-- TAB A: RECORDS DATA GRID -->
+          <div v-if="activeDataTab === 'browser'" class="rounded-lg border border-border bg-card shadow-sm overflow-hidden flex flex-col">
+            <!-- Grid Toolbar -->
+            <div class="p-2.5 border-b border-border bg-muted/40 flex flex-wrap items-center justify-between gap-2">
+              <div class="flex items-center gap-2 flex-1 min-w-[260px]">
+                <div class="relative w-56">
+                  <icon name="search" class="w-3 h-3 absolute left-2.5 top-2 text-muted-foreground"></icon>
+                  <input 
+                    v-model="searchFilter"
+                    type="text" 
+                    placeholder="Search across fields..." 
+                    class="flex h-7 w-full rounded-md border border-input bg-background pl-7 pr-2.5 text-[11px] shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+                  />
+                </div>
+
+                <div class="relative w-40" id="collection-filter-combobox">
+                  <button 
+                    @click.stop="collectionDropdownOpen = !collectionDropdownOpen; vectorDropdownOpen = false"
+                    type="button"
+                    class="flex h-7 w-full items-center justify-between rounded-md border border-input bg-background px-2.5 text-[11px] shadow-sm hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground transition-colors"
+                  >
+                    <span class="truncate">{{ collectionFilter || 'All Collections' }}</span>
+                    <icon name="chevrons-up-down" class="w-3 h-3 ml-1.5 shrink-0 opacity-50"></icon>
+                  </button>
+                  <div 
+                    v-if="collectionDropdownOpen" 
+                    class="absolute top-full left-0 mt-1 w-full max-h-52 overflow-y-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md z-50 animate-in fade-in-0 zoom-in-95"
+                  >
+                    <button 
+                      type="button"
+                      @click="selectCollectionFilter('')"
+                      class="relative flex w-full cursor-pointer select-none items-center rounded-sm py-1 pl-6 pr-2 text-[11px] outline-none hover:bg-accent hover:text-accent-foreground text-left"
+                    >
+                      <span v-if="!collectionFilter" class="absolute left-1.5 flex h-3.5 w-3.5 items-center justify-center">
+                        <icon name="check" class="w-3 h-3 text-teal-600 dark:text-teal-400"></icon>
+                      </span>
+                      <span :class="{'font-medium': !collectionFilter}">All Collections</span>
+                    </button>
+                    <button 
+                      v-for="c in collectionsList" 
+                      :key="c"
+                      type="button"
+                      @click="selectCollectionFilter(c)"
+                      class="relative flex w-full cursor-pointer select-none items-center rounded-sm py-1 pl-6 pr-2 text-[11px] outline-none hover:bg-accent hover:text-accent-foreground text-left truncate"
+                    >
+                      <span v-if="collectionFilter === c" class="absolute left-1.5 flex h-3.5 w-3.5 items-center justify-center">
+                        <icon name="check" class="w-3 h-3 text-teal-600 dark:text-teal-400"></icon>
+                      </span>
+                      <span :class="{'font-medium': collectionFilter === c}">{{ c }}</span>
+                    </button>
+                  </div>
+                </div>
+
+                <button 
+                  @click="loadRecords()" 
+                  class="inline-flex items-center justify-center rounded-md text-[11px] font-medium border border-input bg-background h-7 px-2 hover:bg-accent transition-colors text-muted-foreground hover:text-foreground shadow-sm"
+                >
+                  <icon name="refresh-cw" :class="['w-3 h-3 mr-1', recordsLoading ? 'animate-spin' : '']"></icon>
+                  Refresh
+                </button>
+              </div>
+
+              <div class="flex items-center gap-1.5">
+                <button 
+                  @click="openSqliteImportModal()"
+                  class="inline-flex items-center justify-center rounded-md text-[11px] font-medium border border-input bg-background h-7 px-2.5 hover:bg-accent transition-colors shadow-sm text-foreground"
+                  title="Import .sqlite, .db, or .sqlite3 database file into NioDB collections"
+                >
+                  <icon name="upload" class="w-3 h-3 mr-1 text-teal-600 dark:text-teal-400"></icon>
+                  Import SQLite
+                </button>
+                <button 
+                  @click="exportSqlite()"
+                  class="inline-flex items-center justify-center rounded-md text-[11px] font-medium border border-input bg-background h-7 px-2.5 hover:bg-accent transition-colors shadow-sm text-foreground"
+                  title="Export all database collections to .sqlite database file"
+                >
+                  <icon name="database" class="w-3 h-3 mr-1 text-teal-600 dark:text-teal-400"></icon>
+                  Export SQLite
+                </button>
+                <button 
+                  @click="exportRecords()"
+                  class="inline-flex items-center justify-center rounded-md text-[11px] font-medium border border-input bg-background h-7 px-2.5 hover:bg-accent transition-colors shadow-sm text-foreground"
+                >
+                  <icon name="download" class="w-3 h-3 mr-1"></icon>
+                  Export JSON
+                </button>
+                <button 
+                  @click="openNewRecordModal()"
+                  class="inline-flex items-center justify-center rounded-md text-[11px] font-medium bg-primary text-primary-foreground h-7 px-2.5 shadow hover:bg-primary/90 transition-colors"
+                >
+                  <icon name="plus" class="w-3 h-3 mr-1"></icon>
+                  New Record
+                </button>
+              </div>
+            </div>
+
+            <!-- Table Wrapper -->
+            <div class="overflow-x-auto max-h-[calc(100vh-320px)]">
+              <table class="w-full text-left border-collapse text-[11px]">
+                <thead>
+                  <tr class="border-b border-border bg-muted/30 font-medium text-muted-foreground uppercase text-[10px] tracking-wider sticky top-0 z-10">
+                    <th class="py-2 px-3">Record ID</th>
+                    <th class="py-2 px-3">Collection</th>
+                    <th class="py-2 px-3">Data Preview</th>
+                    <th class="py-2 px-3">Created At</th>
+                    <th class="py-2 px-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-border/60">
+                  <tr v-if="recordsLoading">
+                    <td colspan="5" class="py-6 text-center text-muted-foreground text-xs">
+                      <div class="inline-flex items-center gap-1.5">
+                        <icon name="loader-2" class="w-3.5 h-3.5 animate-spin text-primary"></icon>
+                        <span>Loading records from NioDB...</span>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr v-else-if="filteredRecords.length === 0">
+                    <td colspan="5" class="py-6 text-center text-muted-foreground text-xs">
+                      No records found. Click "New Record" to insert your first document.
+                    </td>
+                  </tr>
+                  <tr 
+                    v-for="record in filteredRecords" 
+                    :key="record.id || record.record_id"
+                    @click="viewRecordDetail(record)"
+                    class="hover:bg-muted/40 transition-colors cursor-pointer group"
+                  >
+                    <td class="py-2 px-3 font-mono font-medium text-primary">
+                      {{ record.id || record.record_id }}
+                    </td>
+                    <td class="py-2 px-3">
+                      <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-secondary text-secondary-foreground border border-border">
+                        {{ record.collection || record.type || 'general' }}
+                      </span>
+                    </td>
+                    <td class="py-2 px-3 font-mono text-muted-foreground max-w-md truncate">
+                      {{ JSON.stringify(record.data || record) }}
+                    </td>
+                    <td class="py-2 px-3 text-muted-foreground font-mono">
+                      {{ formatDate(record.created_at) }}
+                    </td>
+                    <td class="py-2 px-3 text-right">
+                      <button 
+                        @click.stop="viewRecordDetail(record)" 
+                        class="inline-flex items-center justify-center rounded px-1.5 py-0.5 text-[10px] font-medium border border-border bg-background hover:bg-accent text-muted-foreground hover:text-foreground transition-colors shadow-sm"
+                      >
+                        Inspect
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Grid Pagination Footer -->
+            <div class="py-2 px-3 border-t border-border bg-muted/30 flex items-center justify-between text-[11px] text-muted-foreground">
+              <div>
+                Showing <span class="font-medium text-foreground">{{ filteredRecords.length }}</span> records
+              </div>
+              <div class="flex items-center gap-2.5">
+                <div class="flex items-center gap-1.5">
+                  <span>Rows:</span>
+                  <select 
+                    v-model="limit" 
+                    @change="loadRecords()"
+                    class="h-6 rounded border border-input bg-background px-1.5 text-[11px] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+                  >
+                    <option :value="15">15</option>
+                    <option :value="25">25</option>
+                    <option :value="50">50</option>
+                    <option :value="100">100</option>
+                  </select>
+                </div>
+                <button 
+                  @click="loadNextPage()"
+                  :disabled="!nextCursor"
+                  class="inline-flex items-center justify-center rounded-md border border-input bg-background px-2.5 h-6 text-[11px] font-medium hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-foreground shadow-sm"
+                >
+                  <span>Next Page</span>
+                  <icon name="arrow-right" class="w-3 h-3 ml-1"></icon>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB B: SQL QUERY STUDIO -->
+          <div v-if="activeDataTab === 'sql'" class="space-y-4">
+            <div class="rounded-lg border border-border bg-card p-4 shadow-sm space-y-3">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h3 class="text-xs font-semibold tracking-tight text-foreground flex items-center gap-1.5">
+                    <icon name="terminal" class="w-3.5 h-3.5 text-teal-600 dark:text-teal-400"></icon>
+                    AlaSQL Query Studio
+                  </h3>
+                  <p class="text-[11px] text-muted-foreground mt-0.5">
+                    Execute authorized SELECT queries, joins, aggregates, and filters against your database records.
+                  </p>
+                </div>
+                <div class="flex items-center gap-1.5">
+                  <button 
+                    @click="setSqlPreset('SELECT * FROM records LIMIT 25;')"
+                    class="text-[11px] px-2 py-0.5 rounded-md border border-border bg-secondary hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    All Records
+                  </button>
+                  <button 
+                    @click="setSqlPreset('SELECT collection, count(*) as count FROM records GROUP BY collection;')"
+                    class="text-[11px] px-2 py-0.5 rounded-md border border-border bg-secondary hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    Group by Collection
+                  </button>
+                  <button 
+                    @click="setSqlPreset('SELECT id, collection, created_at FROM records ORDER BY created_at DESC LIMIT 10;')"
+                    class="text-[11px] px-2 py-0.5 rounded-md border border-border bg-secondary hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    Recent Records
+                  </button>
+                </div>
+              </div>
+
+              <!-- SQL Editor Input -->
+              <div class="relative">
+                <textarea 
+                  v-model="sqlQuery"
+                  @keydown.ctrl.enter="executeSql()"
+                  @keydown.meta.enter="executeSql()"
+                  rows="4" 
+                  class="flex w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-mono shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+                  placeholder="SELECT * FROM records LIMIT 25;"
+                ></textarea>
+              </div>
+
+              <div class="flex items-center justify-between text-[11px] text-muted-foreground pt-0.5">
+                <span>Press <kbd class="px-1.5 py-0.5 rounded bg-muted font-mono border border-border text-[10px]">Ctrl+Enter</kbd> to run</span>
+                <button 
+                  @click="executeSql()" 
+                  :disabled="sqlLoading"
+                  class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground font-semibold px-3 h-7 text-[11px] shadow hover:bg-primary/90 transition-colors disabled:opacity-50"
+                >
+                  <icon name="play" class="w-3 h-3 mr-1 fill-current"></icon>
+                  {{ sqlLoading ? 'Executing...' : 'Run Query' }}
+                </button>
+              </div>
+            </div>
+
+            <!-- SQL Results Table -->
+            <div v-if="sqlResults.length > 0 || sqlError" class="rounded-lg border border-border bg-card shadow-sm overflow-hidden flex flex-col">
+              <div class="p-2.5 border-b border-border bg-muted/40 flex items-center justify-between">
+                <span class="text-[11px] font-mono text-muted-foreground">{{ sqlMetrics }}</span>
+                <button 
+                  v-if="sqlResults.length > 0"
+                  @click="exportSqlCsv()"
+                  class="inline-flex items-center justify-center rounded-md border border-input bg-background h-6 px-2 text-[11px] font-medium hover:bg-accent text-foreground shadow-sm"
+                >
+                  <icon name="file-spreadsheet" class="w-3 h-3 mr-1"></icon>
+                  Export CSV
+                </button>
+              </div>
+
+              <div v-if="sqlError" class="p-3 text-[11px] font-mono text-destructive bg-destructive/10">
+                {{ sqlError }}
+              </div>
+
+              <div v-else class="overflow-x-auto max-h-96">
+                <table class="w-full text-left border-collapse text-[11px]">
+                  <thead>
+                    <tr class="border-b border-border bg-muted/30 font-medium text-muted-foreground uppercase text-[10px] tracking-wider">
+                      <th v-for="col in sqlColumns" :key="col" class="py-2 px-3 font-semibold">{{ col }}</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-border/60">
+                    <tr v-for="(row, i) in sqlResults" :key="i" class="hover:bg-muted/40 transition-colors font-mono">
+                      <td v-for="col in sqlColumns" :key="col" class="py-2 px-3 text-muted-foreground">
+                        {{ formatTableCell(row[col]) }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB C: HUMAN / AGENTIC QUERY -->
+          <div v-if="activeDataTab === 'human'" class="space-y-4">
+            <div class="rounded-lg border border-border bg-card p-4 shadow-sm space-y-3">
+              <div>
+                <h3 class="text-xs font-semibold tracking-tight text-foreground flex items-center gap-1.5">
+                  <icon name="bot" class="w-3.5 h-3.5 text-teal-600 dark:text-teal-400"></icon>
+                  Natural Language Query Planning (Nio Intelligence)
+                </h3>
+                <p class="text-[11px] text-muted-foreground mt-0.5">
+                  Ask natural-language questions. Nio CLI formulates bounded read plans, executes authorized queries, and provides grounded answers.
+                </p>
+              </div>
+
+              <div class="flex gap-2">
+                <input 
+                  v-model="humanPrompt" 
+                  @keydown.enter="askHuman()"
+                  type="text" 
+                  placeholder="e.g., How many records are in our database, grouped by collection?"
+                  class="flex h-8 w-full rounded-md border border-input bg-background px-3 text-[11px] shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+                />
+                <button 
+                  @click="askHuman()" 
+                  :disabled="humanLoading"
+                  class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground font-semibold px-3 h-8 text-[11px] shadow hover:bg-primary/90 transition-colors whitespace-nowrap disabled:opacity-50"
+                >
+                  <icon name="sparkles" class="w-3 h-3 mr-1"></icon>
+                  {{ humanLoading ? 'Consulting Nio...' : 'Ask Nio' }}
+                </button>
+              </div>
+
+              <div class="flex items-center gap-1.5 pt-0.5 flex-wrap">
+                <span class="text-[11px] text-muted-foreground">Try asking:</span>
+                <button 
+                  @click="humanPrompt = 'Count total records and group by collection'; askHuman();"
+                  class="text-[11px] px-2 py-0.5 rounded-full border border-border bg-secondary hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  "Count total records and group by collection"
+                </button>
+                <button 
+                  @click="humanPrompt = 'Show the most recently created 5 records'; askHuman();"
+                  class="text-[11px] px-2 py-0.5 rounded-full border border-border bg-secondary hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  "Show the most recently created 5 records"
+                </button>
+              </div>
+            </div>
+
+            <!-- Human Answer Card -->
+            <div v-if="humanAnswer || humanQueries.length > 0 || humanError" class="rounded-lg border border-border bg-card p-4 shadow-sm space-y-2.5">
+              <h4 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Answer</h4>
+              
+              <div v-if="humanError" class="text-[11px] text-destructive bg-destructive/10 p-2.5 rounded-md font-mono">
+                {{ humanError }}
+              </div>
+              
+              <div v-if="humanAnswer" class="text-xs leading-relaxed text-foreground whitespace-pre-wrap">
+                {{ humanAnswer }}
+              </div>
+
+              <div v-if="humanQueries.length > 0" class="pt-2.5 border-t border-border space-y-1.5">
+                <div class="text-[11px] font-semibold text-primary flex items-center gap-1">
+                  <icon name="code" class="w-3 h-3"></icon> Generated Read Queries:
+                </div>
+                <div class="bg-muted/40 p-2.5 rounded-md border border-border font-mono text-[11px] text-muted-foreground space-y-1">
+                  <div v-for="(q, i) in humanQueries" :key="i">{{ q }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB D: VECTOR & SEMANTIC SEARCH -->
+          <div v-if="activeDataTab === 'vector'" class="space-y-4">
+            <div class="rounded-lg border border-border bg-card p-4 shadow-sm space-y-3">
+              <div>
+                <h3 class="text-xs font-semibold tracking-tight text-foreground flex items-center gap-1.5">
+                  <icon name="target" class="w-3.5 h-3.5 text-teal-600 dark:text-teal-400"></icon>
+                  Vector Similarity Search (Pure Rust SIMD Engine)
+                </h3>
+                <p class="text-[11px] text-muted-foreground mt-0.5">
+                  Perform real-time cosine similarity search over vector embeddings stored in any collection with zero external vector database overhead.
+                </p>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div class="relative w-full" id="vector-collection-combobox">
+                  <label class="block text-[11px] font-medium text-muted-foreground mb-1">Target Collection</label>
+                  <button 
+                    @click.stop="vectorDropdownOpen = !vectorDropdownOpen; collectionDropdownOpen = false"
+                    type="button"
+                    class="flex h-8 w-full items-center justify-between rounded-md border border-input bg-background px-2.5 text-[11px] shadow-sm hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground transition-colors"
+                  >
+                    <span class="truncate">{{ vectorSearchCollection || 'All Collections' }}</span>
+                    <icon name="chevrons-up-down" class="w-3.5 h-3.5 ml-1.5 shrink-0 opacity-50"></icon>
+                  </button>
+                  <div 
+                    v-if="vectorDropdownOpen" 
+                    class="absolute top-full left-0 mt-1 w-full max-h-52 overflow-y-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md z-50 animate-in fade-in-0 zoom-in-95"
+                  >
+                    <button 
+                      type="button"
+                      @click="selectVectorCollection('')"
+                      class="relative flex w-full cursor-pointer select-none items-center rounded-sm py-1.5 pl-6 pr-2 text-[11px] outline-none hover:bg-accent hover:text-accent-foreground text-left"
+                    >
+                      <span v-if="!vectorSearchCollection" class="absolute left-1.5 flex h-3.5 w-3.5 items-center justify-center">
+                        <icon name="check" class="w-3 h-3 text-teal-600 dark:text-teal-400"></icon>
+                      </span>
+                      <span :class="{'font-medium': !vectorSearchCollection}">All Collections</span>
+                    </button>
+                    <button 
+                      v-for="c in collectionsList" 
+                      :key="c"
+                      type="button"
+                      @click="selectVectorCollection(c)"
+                      class="relative flex w-full cursor-pointer select-none items-center rounded-sm py-1.5 pl-6 pr-2 text-[11px] outline-none hover:bg-accent hover:text-accent-foreground text-left truncate"
+                    >
+                      <span v-if="vectorSearchCollection === c" class="absolute left-1.5 flex h-3.5 w-3.5 items-center justify-center">
+                        <icon name="check" class="w-3 h-3 text-teal-600 dark:text-teal-400"></icon>
+                      </span>
+                      <span :class="{'font-medium': vectorSearchCollection === c}">{{ c }}</span>
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label class="block text-[11px] font-medium text-muted-foreground mb-1">Top K Results</label>
+                  <input 
+                    v-model.number="vectorSearchTopK" 
+                    type="number" 
+                    min="1" 
+                    max="100"
+                    class="flex h-8 w-full rounded-md border border-input bg-background px-3 text-[11px] shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+                  />
+                </div>
+                <div>
+                  <label class="block text-[11px] font-medium text-muted-foreground mb-1">Min Similarity Score (0.0 - 1.0)</label>
+                  <input 
+                    v-model.number="vectorSearchMinScore" 
+                    type="number" 
+                    step="0.05" 
+                    min="0" 
+                    max="1"
+                    class="flex h-8 w-full rounded-md border border-input bg-background px-3 text-[11px] shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label class="block text-[11px] font-medium text-muted-foreground mb-1">Query Vector (JSON array or comma-separated numbers)</label>
+                <textarea 
+                  v-model="vectorSearchInput" 
+                  rows="2" 
+                  placeholder="[0.05, 0.12, 0.88, 0.34, ...]"
+                  class="flex w-full rounded-md border border-input bg-card px-3 py-1.5 text-xs font-mono shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+                ></textarea>
+              </div>
+
+              <div class="flex items-center justify-between pt-1">
+                <div class="flex items-center gap-1.5">
+                  <button 
+                    @click="vectorSearchInput = '[0.1, 0.2, 0.3, 0.4]'; executeVectorSearch();"
+                    class="text-[11px] px-2 py-0.5 rounded-md border border-border bg-secondary hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    Sample 4D Vector
+                  </button>
+                </div>
+                <button 
+                  @click="executeVectorSearch()" 
+                  :disabled="vectorSearchLoading"
+                  class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground font-semibold px-4 h-7 text-[11px] shadow hover:bg-primary/90 transition-colors disabled:opacity-50"
+                >
+                  <icon name="target" class="w-3 h-3 mr-1"></icon>
+                  {{ vectorSearchLoading ? 'Searching...' : 'Search Vectors' }}
+                </button>
+              </div>
+            </div>
+
+            <!-- Vector Results -->
+            <div v-if="vectorSearchResults.length > 0 || vectorSearchError" class="rounded-lg border border-border bg-card shadow-sm overflow-hidden flex flex-col">
+              <div class="p-2.5 border-b border-border bg-muted/40 flex items-center justify-between text-[11px]">
+                <span class="font-medium text-foreground">Matched Records ({{ vectorSearchResults.length }})</span>
+                <span class="text-muted-foreground font-mono">SIMD Cosine Distance</span>
+              </div>
+
+              <div v-if="vectorSearchError" class="p-3 text-[11px] font-mono text-destructive bg-destructive/10">
+                {{ vectorSearchError }}
+              </div>
+
+              <div v-else class="divide-y divide-border/60">
+                <div 
+                  v-for="(item, i) in vectorSearchResults" 
+                  :key="item.id || i" 
+                  class="p-3 hover:bg-muted/30 transition-colors flex flex-col gap-2"
+                >
+                  <div class="flex items-center justify-between text-xs">
+                    <div class="flex items-center gap-2">
+                      <span class="font-mono font-medium text-primary">{{ item.id }}</span>
+                      <span class="px-1.5 py-0.2 rounded text-[10px] bg-secondary text-secondary-foreground font-semibold border border-border">
+                        {{ item.collection || item.type || 'general' }}
+                      </span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <span class="text-[11px] font-mono font-semibold text-teal-700 dark:text-teal-300">
+                        Score: {{ (item.score || 0).toFixed(4) }}
+                      </span>
+                      <div class="w-20 bg-secondary h-1.5 rounded-full overflow-hidden">
+                        <div class="bg-primary h-full" :style="{ width: Math.max(0, Math.min(100, (item.score || 0) * 100)) + '%' }"></div>
+                      </div>
+                    </div>
+                  </div>
+                  <pre class="bg-muted/30 p-2 rounded border border-border font-mono text-[11px] text-muted-foreground overflow-x-auto">{{ JSON.stringify(item.data || item, null, 2) }}</pre>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB E & F (COMMENTED OUT)
+          <div v-if="activeDataTab === 'sessions'" class="space-y-4">
+            <div class="p-2.5 rounded-lg border border-border bg-card shadow-sm flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <icon name="history" class="w-4 h-4 text-teal-600 dark:text-teal-400"></icon>
+                <span class="text-xs font-semibold text-foreground">NioBridge Multi-Agent Sessions</span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <button 
+                  @click="loadSessions()"
+                  class="inline-flex items-center justify-center rounded-md border border-input bg-background h-7 px-2 text-[11px] font-medium hover:bg-accent text-foreground shadow-sm"
+                >
+                  <icon name="refresh-cw" class="w-3 h-3 mr-1"></icon> Refresh
+                </button>
+                <button 
+                  @click="openNewSessionModal()"
+                  class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground h-7 px-2.5 text-[11px] font-medium shadow hover:bg-primary/90"
+                >
+                  <icon name="plus" class="w-3 h-3 mr-1"></icon> New Session
+                </button>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div class="md:col-span-1 rounded-lg border border-border bg-card p-3 shadow-sm space-y-2">
+                <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Sessions ({{ sessionsList.length }})</span>
+                <div v-if="sessionsLoading" class="py-6 text-center text-xs text-muted-foreground">Loading sessions...</div>
+                <div v-else-if="sessionsList.length === 0" class="py-6 text-center text-xs text-muted-foreground">No active sessions found.</div>
+                <div v-else class="space-y-1 max-h-[calc(100vh-360px)] overflow-y-auto">
+                  <div 
+                    v-for="s in sessionsList" 
+                    :key="s.id"
+                    @click="selectSession(s)"
+                    :class="[
+                      'p-2.5 rounded-md border transition-all cursor-pointer text-left flex flex-col gap-1',
+                      selectedSession && selectedSession.id === s.id
+                        ? 'border-primary bg-teal-500/10 shadow-sm'
+                        : 'border-border bg-background hover:bg-muted/40'
+                    ]"
+                  >
+                    <div class="flex items-center justify-between text-xs">
+                      <span class="font-semibold text-foreground truncate">{{ s.data?.title || s.title || s.id }}</span>
+                      <span class="px-1.5 py-0.2 rounded text-[10px] bg-secondary font-mono text-muted-foreground">{{ s.data?.model_tier || 'strong' }}</span>
+                    </div>
+                    <div class="text-[11px] text-muted-foreground truncate">{{ s.data?.goal || 'No explicit goal' }}</div>
+                    <div class="text-[10px] text-muted-foreground font-mono flex items-center justify-between pt-1 border-t border-border/40">
+                      <span>{{ (s.data?.turns || []).length }} turns</span>
+                      <span>{{ formatDate(s.created_at) }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="md:col-span-2 rounded-lg border border-border bg-card p-4 shadow-sm space-y-3">
+                <div v-if="!selectedSession" class="py-12 text-center text-xs text-muted-foreground">
+                  Select a session from the left to view turn chronology, lean manifest, and dead-end memory.
+                </div>
+                <div v-else class="space-y-3">
+                  <div class="flex items-center justify-between border-b border-border pb-2.5">
+                    <div>
+                      <h4 class="text-xs font-semibold text-foreground">{{ selectedSession.data?.title || selectedSession.id }}</h4>
+                      <p class="text-[11px] text-muted-foreground mt-0.5">Goal: {{ selectedSession.data?.goal || 'N/A' }}</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-secondary text-secondary-foreground border border-border">
+                        {{ selectedSession.id }}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h5 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Turn History</h5>
+                    <div v-if="!(selectedSession.data?.turns && selectedSession.data?.turns.length > 0)" class="text-xs text-muted-foreground py-2">
+                      No agent turns recorded yet.
+                    </div>
+                    <div v-else class="space-y-2 max-h-56 overflow-y-auto">
+                      <div 
+                        v-for="(t, idx) in selectedSession.data.turns" 
+                        :key="idx" 
+                        class="p-2.5 rounded border border-border bg-muted/20 text-xs space-y-1"
+                      >
+                        <div class="flex items-center justify-between text-[11px]">
+                          <span class="font-semibold text-primary">Turn #{{ idx + 1 }} · {{ t.agent || 'Agent' }}</span>
+                          <span class="font-mono text-muted-foreground">{{ t.model || 'unknown' }}</span>
+                        </div>
+                        <div class="text-foreground text-[11px]">{{ t.summary }}</div>
+                        <div v-if="t.files_touched && t.files_touched.length > 0" class="flex items-center gap-1 text-[10px] font-mono text-muted-foreground">
+                          <span>Touched:</span>
+                          <span v-for="f in t.files_touched" :key="f" class="px-1 py-0.2 bg-secondary rounded">{{ f }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="pt-2 border-t border-border">
+                    <h5 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center justify-between">
+                      <span>Dead-End Memory (Loops Prevented)</span>
+                      <span class="font-mono text-primary">{{ (selectedSession.data?.dead_ends || []).length }} logged</span>
+                    </h5>
+                    <div v-if="!(selectedSession.data?.dead_ends && selectedSession.data?.dead_ends.length > 0)" class="text-[11px] text-muted-foreground">
+                      No dead-ends recorded for this session.
+                    </div>
+                    <div v-else class="space-y-1.5 max-h-40 overflow-y-auto">
+                      <div 
+                        v-for="(de, deIdx) in selectedSession.data.dead_ends" 
+                        :key="deIdx"
+                        class="p-2 rounded border border-destructive/20 bg-destructive/5 text-xs text-destructive"
+                      >
+                        <div class="font-semibold">⚠️ Failed Hypothesis: {{ de.hypothesis }}</div>
+                        <div class="text-[11px] text-muted-foreground mt-0.5">Reason: {{ de.reason }} (Agent: {{ de.agent }})</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="activeDataTab === 'tasks'" class="space-y-4">
+            <div class="p-2.5 rounded-lg border border-border bg-card shadow-sm flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <icon name="list-todo" class="w-4 h-4 text-teal-600 dark:text-teal-400"></icon>
+                <span class="text-xs font-semibold text-foreground">Nio0 Agent Tasks & Lifecycle Monitor</span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <button 
+                  @click="loadTasks()"
+                  class="inline-flex items-center justify-center rounded-md border border-input bg-background h-7 px-2 text-[11px] font-medium hover:bg-accent text-foreground shadow-sm"
+                >
+                  <icon name="refresh-cw" class="w-3 h-3 mr-1"></icon> Refresh
+                </button>
+                <button 
+                  @click="openNewTaskModal()"
+                  class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground h-7 px-2.5 text-[11px] font-medium shadow hover:bg-primary/90"
+                >
+                  <icon name="plus" class="w-3 h-3 mr-1"></icon> Create Task
+                </button>
+              </div>
+            </div>
+
+            <div class="rounded-lg border border-border bg-card shadow-sm overflow-hidden flex flex-col">
+              <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse text-[11px]">
+                  <thead>
+                    <tr class="border-b border-border bg-muted/30 font-medium text-muted-foreground uppercase text-[10px] tracking-wider">
+                      <th class="py-2 px-3">Task ID</th>
+                      <th class="py-2 px-3">Title & Prompt</th>
+                      <th class="py-2 px-3">Status</th>
+                      <th class="py-2 px-3">Priority</th>
+                      <th class="py-2 px-3">Progress</th>
+                      <th class="py-2 px-3">Created</th>
+                      <th class="py-2 px-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-border/60">
+                    <tr v-if="tasksLoading">
+                      <td colspan="7" class="py-6 text-center text-muted-foreground text-xs">Loading tasks...</td>
+                    </tr>
+                    <tr v-else-if="tasksList.length === 0">
+                      <td colspan="7" class="py-6 text-center text-muted-foreground text-xs">No tasks registered yet.</td>
+                    </tr>
+                    <tr v-for="t in tasksList" :key="t.id" class="hover:bg-muted/40 transition-colors">
+                      <td class="py-2 px-3 font-mono text-primary font-medium">{{ t.id }}</td>
+                      <td class="py-2 px-3">
+                        <div class="font-semibold text-foreground">{{ t.data?.title || t.title }}</div>
+                        <div class="text-muted-foreground text-[10px] truncate max-w-xs">{{ t.data?.prompt || t.prompt }}</div>
+                      </td>
+                      <td class="py-2 px-3">
+                        <span :class="[
+                          'px-1.5 py-0.5 rounded text-[10px] font-semibold border',
+                          (t.data?.status || t.status) === 'completed' ? 'bg-teal-500/15 text-teal-700 dark:text-teal-300 border-teal-500/30' :
+                          (t.data?.status || t.status) === 'running' ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30' :
+                          (t.data?.status || t.status) === 'failed' ? 'bg-destructive/15 text-destructive border-destructive/30' :
+                          'bg-secondary text-muted-foreground border-border'
+                        ]">
+                          {{ t.data?.status || t.status || 'pending' }}
+                        </span>
+                      </td>
+                      <td class="py-2 px-3 font-mono text-muted-foreground uppercase text-[10px]">
+                        {{ t.data?.priority || t.priority || 'normal' }}
+                      </td>
+                      <td class="py-2 px-3 font-mono text-muted-foreground">
+                        <div class="flex items-center gap-1.5">
+                          <span>{{ t.data?.progress || t.progress || 0 }}%</span>
+                          <div class="w-12 bg-secondary h-1.5 rounded-full overflow-hidden">
+                            <div class="bg-primary h-full" :style="{ width: (t.data?.progress || t.progress || 0) + '%' }"></div>
+                          </div>
+                        </div>
+                      </td>
+                      <td class="py-2 px-3 text-muted-foreground font-mono">{{ formatDate(t.created_at) }}</td>
+                      <td class="py-2 px-3 text-right">
+                        <button 
+                          @click="viewRecordDetail(t)"
+                          class="inline-flex items-center justify-center rounded px-1.5 py-0.5 text-[10px] font-medium border border-border bg-background hover:bg-accent text-muted-foreground hover:text-foreground shadow-sm"
+                        >
+                          Inspect
+                        </button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          -->
+        </div>
+
+        <!-- =================== VIEW 2: FILES & BUCKETS =================== -->
+        <div v-if="activeNav === 'files'" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <!-- Buckets List Panel -->
+          <div class="md:col-span-1 rounded-lg border border-border bg-card p-3 shadow-sm flex flex-col space-y-2.5">
+            <div class="flex items-center justify-between">
+              <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Buckets</span>
+              <button 
+                @click="newBucketModalOpen = true"
+                class="inline-flex items-center justify-center rounded-md text-[11px] font-medium border border-input bg-background h-6 px-2 hover:bg-accent text-foreground shadow-sm"
+              >
+                <icon name="plus" class="w-3 h-3 mr-1"></icon> New
+              </button>
+            </div>
+
+            <div class="space-y-0.5">
+              <div v-if="buckets.length === 0" class="text-[11px] text-muted-foreground py-3 text-center">
+                No buckets yet
+              </div>
+              <button 
+                v-for="b in buckets" 
+                :key="b.name"
+                @click="selectBucket(b.name)"
+                :class="[
+                  'w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-colors text-left',
+                  activeBucket === b.name 
+                    ? 'bg-secondary text-foreground font-semibold shadow-sm' 
+                    : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+                ]"
+              >
+                <div class="flex items-center gap-1.5 truncate">
+                  <icon name="folder" class="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 flex-shrink-0"></icon>
+                  <span class="truncate">{{ b.name }}</span>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          <!-- Files Grid Panel -->
+          <div class="md:col-span-3 rounded-lg border border-border bg-card shadow-sm overflow-hidden flex flex-col">
+            <div class="p-2.5 border-b border-border bg-muted/40 flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-semibold text-foreground">
+                  Bucket: <span class="font-mono text-primary">{{ activeBucket || 'None' }}</span>
+                </span>
+                <span class="px-1.5 py-0.5 rounded text-[10px] bg-secondary text-secondary-foreground font-mono">
+                  {{ files.length }} files
+                </span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <button 
+                  @click="loadFiles()"
+                  class="inline-flex items-center justify-center rounded-md border border-input bg-background h-7 px-2 text-[11px] font-medium hover:bg-accent text-foreground shadow-sm"
+                >
+                  <icon name="refresh-cw" class="w-3 h-3 mr-1"></icon> Refresh
+                </button>
+                <button 
+                  @click="openUploadModal()"
+                  class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground h-7 px-2.5 text-[11px] font-medium shadow hover:bg-primary/90"
+                >
+                  <icon name="upload" class="w-3 h-3 mr-1"></icon> Upload File
+                </button>
+              </div>
+            </div>
+
+            <!-- Files Table -->
+            <div class="overflow-x-auto max-h-[calc(100vh-320px)]">
+              <table class="w-full text-left border-collapse text-[11px]">
+                <thead>
+                  <tr class="border-b border-border bg-muted/30 font-medium text-muted-foreground uppercase text-[10px] tracking-wider">
+                    <th class="py-2 px-3">Filename</th>
+                    <th class="py-2 px-3">Size</th>
+                    <th class="py-2 px-3">Content Type</th>
+                    <th class="py-2 px-3">Owner</th>
+                    <th class="py-2 px-3">Uploaded</th>
+                    <th class="py-2 px-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-border/60">
+                  <tr v-if="filesLoading">
+                    <td colspan="6" class="py-6 text-center text-muted-foreground text-xs">Loading files...</td>
+                  </tr>
+                  <tr v-else-if="files.length === 0">
+                    <td colspan="6" class="py-6 text-center text-muted-foreground text-xs">
+                      No files stored in this bucket.
+                    </td>
+                  </tr>
+                  <tr v-for="file in files" :key="file.id" class="hover:bg-muted/40 transition-colors">
+                    <td class="py-2 px-3 font-medium text-foreground flex items-center gap-1.5">
+                      <icon name="file" class="w-3.5 h-3.5 text-muted-foreground"></icon>
+                      <span>{{ file.filename || file.id }}</span>
+                    </td>
+                    <td class="py-2 px-3 font-mono text-muted-foreground">{{ formatBytes(file.size_bytes || 0) }}</td>
+                    <td class="py-2 px-3">
+                      <span class="px-1.5 py-0.5 rounded text-[10px] bg-secondary text-secondary-foreground font-mono">
+                        {{ file.content_type || 'octet-stream' }}
+                      </span>
+                    </td>
+                    <td class="py-2 px-3 font-mono text-muted-foreground">{{ file.user_id || 'shared' }}</td>
+                    <td class="py-2 px-3 text-muted-foreground font-mono">{{ formatDate(file.created_at) }}</td>
+                    <td class="py-2 px-3 text-right space-x-1">
+                      <a 
+                        :href="`/api/v1/storage/${encodeURIComponent(activeBucket)}/${encodeURIComponent(file.id)}`" 
+                        target="_blank" 
+                        download
+                        class="inline-flex items-center justify-center rounded px-1.5 py-0.5 text-[10px] font-medium border border-border bg-background hover:bg-accent text-foreground transition-colors shadow-sm"
+                      >
+                        Download
+                      </a>
+                      <button 
+                        @click="deleteFile(file.id)"
+                        class="inline-flex items-center justify-center rounded px-1.5 py-0.5 text-[10px] font-medium border border-destructive/30 bg-destructive/10 hover:bg-destructive/20 text-destructive transition-colors"
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- =================== VIEW 3: EVENTS & WEBHOOK =================== -->
+        <div v-if="activeNav === 'events'" class="space-y-4">
+          <!-- Events Tabs -->
+          <div class="inline-flex h-8 items-center justify-center rounded-lg bg-muted p-0.5 text-muted-foreground border border-border">
+            <button 
+              @click="activeEventTab = 'stream'"
+              :class="[
+                'inline-flex items-center justify-center whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-medium ring-offset-background transition-all',
+                activeEventTab === 'stream' ? 'bg-background text-foreground shadow-sm font-semibold' : 'hover:text-foreground'
+              ]"
+            >
+              <icon name="activity" class="w-3 h-3 mr-1.5"></icon> Live SSE Stream
+            </button>
+            <button 
+              @click="activeEventTab = 'publish'"
+              :class="[
+                'inline-flex items-center justify-center whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-medium ring-offset-background transition-all',
+                activeEventTab === 'publish' ? 'bg-background text-foreground shadow-sm font-semibold' : 'hover:text-foreground'
+              ]"
+            >
+              <icon name="send" class="w-3 h-3 mr-1.5"></icon> Publish Event
+            </button>
+            <button 
+              @click="activeEventTab = 'webhooks'"
+              :class="[
+                'inline-flex items-center justify-center whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-medium ring-offset-background transition-all',
+                activeEventTab === 'webhooks' ? 'bg-background text-foreground shadow-sm font-semibold' : 'hover:text-foreground'
+              ]"
+            >
+              <icon name="webhook" class="w-3 h-3 mr-1.5"></icon> Webhooks
+            </button>
+            <button 
+              @click="activeEventTab = 'workers'"
+              :class="[
+                'inline-flex items-center justify-center whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-medium ring-offset-background transition-all',
+                activeEventTab === 'workers' ? 'bg-background text-foreground shadow-sm font-semibold' : 'hover:text-foreground'
+              ]"
+            >
+              <icon name="cpu" class="w-3 h-3 mr-1.5"></icon> Event Workers
+            </button>
+          </div>
+
+          <!-- SUB-TAB: LIVE SSE STREAM -->
+          <div v-if="activeEventTab === 'stream'" class="rounded-lg border border-border bg-card p-4 shadow-sm space-y-3">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="relative flex h-2 w-2">
+                  <span v-if="streamConnected && !streamPaused" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span :class="['relative inline-flex rounded-full h-2 w-2', streamConnected ? 'bg-emerald-500' : 'bg-amber-500']"></span>
+                </span>
+                <span class="text-xs font-semibold tracking-tight text-foreground">
+                  Live Event Broadcast Stream
+                </span>
+                <span class="text-[11px] text-muted-foreground font-mono">(/api/v1/events/stream)</span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <input 
+                  v-model="streamFilter" 
+                  type="text" 
+                  placeholder="Filter event name..." 
+                  class="h-7 w-40 rounded-md border border-input bg-background px-2 text-[11px] placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground shadow-sm"
+                />
+                <button 
+                  @click="streamPaused = !streamPaused"
+                  class="inline-flex items-center justify-center rounded-md border border-input bg-background h-7 px-2.5 text-[11px] font-medium hover:bg-accent text-foreground shadow-sm"
+                >
+                  {{ streamPaused ? 'Resume' : 'Pause' }}
+                </button>
+                <button 
+                  @click="streamEvents = []"
+                  class="inline-flex items-center justify-center rounded-md border border-input bg-background h-7 px-2 text-[11px] font-medium hover:bg-accent text-muted-foreground hover:text-foreground shadow-sm"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <!-- Terminal Log Window -->
+            <div class="rounded-lg border border-border bg-muted/30 p-3 font-mono text-[11px] h-[380px] overflow-y-auto space-y-2">
+              <div v-if="filteredStreamEvents.length === 0" class="text-muted-foreground text-center py-14">
+                Listening for real-time published events...
+              </div>
+              <div 
+                v-for="(evt, i) in filteredStreamEvents" 
+                :key="i"
+                class="p-2 rounded bg-card border border-border border-l-4 border-l-primary space-y-1 shadow-sm"
+              >
+                <div class="flex items-center justify-between text-[10px] text-muted-foreground">
+                  <span class="font-semibold text-primary bg-primary/10 px-1.5 py-0.5 rounded border border-primary/20">
+                    {{ evt.name || 'event' }}
+                  </span>
+                  <span>{{ evt.time }}</span>
+                </div>
+                <pre class="text-foreground whitespace-pre-wrap">{{ JSON.stringify(evt.data || evt, null, 2) }}</pre>
+              </div>
+            </div>
+          </div>
+
+          <!-- SUB-TAB: PUBLISH EVENT -->
+          <div v-if="activeEventTab === 'publish'" class="rounded-lg border border-border bg-card p-4 shadow-sm max-w-xl space-y-3">
+            <h3 class="text-xs font-semibold tracking-tight text-foreground">
+              Publish Event to SSE Stream & Subscribers
+            </h3>
+            <div class="space-y-2.5 text-[11px]">
+              <div>
+                <label class="block font-medium text-muted-foreground mb-1">Event Name</label>
+                <input 
+                  v-model="publishName" 
+                  type="text" 
+                  placeholder="e.g., user.created or order.completed"
+                  class="flex h-8 w-full rounded-md border border-input bg-background px-2.5 shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+                />
+              </div>
+              <div>
+                <label class="block font-medium text-muted-foreground mb-1">Payload (JSON Object)</label>
+                <textarea 
+                  v-model="publishData" 
+                  rows="5" 
+                  class="flex w-full rounded-md border border-input bg-background px-2.5 py-1.5 font-mono shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+                ></textarea>
+              </div>
+              <button 
+                @click="publishEvent()" 
+                :disabled="publishLoading"
+                class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground font-semibold px-3 h-7 text-[11px] shadow hover:bg-primary/90 transition-colors"
+              >
+                Publish Event
+              </button>
+            </div>
+          </div>
+
+          <!-- SUB-TAB: WEBHOOKS -->
+          <div v-if="activeEventTab === 'webhooks'" class="rounded-lg border border-border bg-card shadow-sm overflow-hidden flex flex-col">
+            <div class="p-2.5 border-b border-border bg-muted/40 flex items-center justify-between">
+              <span class="text-xs font-semibold text-foreground">Registered Webhooks</span>
+              <button 
+                @click="newWebhookModalOpen = true"
+                class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground h-7 px-2.5 text-[11px] font-medium shadow hover:bg-primary/90"
+              >
+                <icon name="plus" class="w-3 h-3 mr-1"></icon> Register Webhook
+              </button>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-left border-collapse text-[11px]">
+                <thead>
+                  <tr class="border-b border-border bg-muted/30 font-medium text-muted-foreground uppercase text-[10px] tracking-wider">
+                    <th class="py-2 px-3">ID</th>
+                    <th class="py-2 px-3">Event Name</th>
+                    <th class="py-2 px-3">Target URL</th>
+                    <th class="py-2 px-3">Created At</th>
+                    <th class="py-2 px-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-border/60">
+                  <tr v-if="webhooks.length === 0">
+                    <td colspan="5" class="py-6 text-center text-muted-foreground text-xs">No webhooks registered yet.</td>
+                  </tr>
+                  <tr v-for="w in webhooks" :key="w.id" class="hover:bg-muted/40 transition-colors">
+                    <td class="py-2 px-3 font-mono text-primary">{{ w.id }}</td>
+                    <td class="py-2 px-3 font-semibold text-foreground">{{ w.event_name }}</td>
+                    <td class="py-2 px-3 font-mono text-muted-foreground">{{ w.url }}</td>
+                    <td class="py-2 px-3 text-muted-foreground font-mono">{{ formatDate(w.created_at) }}</td>
+                    <td class="py-2 px-3 text-right">
+                      <button 
+                        @click="deleteWebhook(w.id)" 
+                        class="inline-flex items-center justify-center rounded px-1.5 py-0.5 text-[10px] font-medium border border-destructive/30 bg-destructive/10 hover:bg-destructive/20 text-destructive shadow-sm"
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- SUB-TAB: WORKERS -->
+          <div v-if="activeEventTab === 'workers'" class="rounded-lg border border-border bg-card shadow-sm overflow-hidden flex flex-col">
+            <div class="p-2.5 border-b border-border bg-muted/40 flex items-center justify-between">
+              <span class="text-xs font-semibold text-foreground">Registered TypeScript Workers</span>
+              <button 
+                @click="newWorkerModalOpen = true"
+                class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground h-7 px-2.5 text-[11px] font-medium shadow hover:bg-primary/90"
+              >
+                <icon name="plus" class="w-3 h-3 mr-1"></icon> Register Worker
+              </button>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-left border-collapse text-[11px]">
+                <thead>
+                  <tr class="border-b border-border bg-muted/30 font-medium text-muted-foreground uppercase text-[10px] tracking-wider">
+                    <th class="py-2 px-3">ID</th>
+                    <th class="py-2 px-3">Event Name</th>
+                    <th class="py-2 px-3">Created By</th>
+                    <th class="py-2 px-3">Created At</th>
+                    <th class="py-2 px-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-border/60">
+                  <tr v-if="workers.length === 0">
+                    <td colspan="5" class="py-6 text-center text-muted-foreground text-xs">No workers registered yet.</td>
+                  </tr>
+                  <tr v-for="w in workers" :key="w.id" class="hover:bg-muted/40 transition-colors">
+                    <td class="py-2 px-3 font-mono text-primary">{{ w.id }}</td>
+                    <td class="py-2 px-3 font-semibold text-foreground">{{ w.event_name }}</td>
+                    <td class="py-2 px-3 text-muted-foreground font-mono">{{ w.created_by }}</td>
+                    <td class="py-2 px-3 text-muted-foreground font-mono">{{ formatDate(w.created_at) }}</td>
+                    <td class="py-2 px-3 text-right">
+                      <button 
+                        @click="deleteWorker(w.id)" 
+                        class="inline-flex items-center justify-center rounded px-1.5 py-0.5 text-[10px] font-medium border border-destructive/30 bg-destructive/10 hover:bg-destructive/20 text-destructive shadow-sm"
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- =================== VIEW 4: AUTH & USERS =================== -->
+        <div v-if="activeNav === 'auth'" class="space-y-4">
+          <div class="rounded-lg border border-border bg-card shadow-sm overflow-hidden flex flex-col">
+            <div class="p-2.5 border-b border-border bg-muted/40 flex items-center justify-between">
+              <div class="flex items-center gap-2.5">
+                <span class="text-xs font-semibold text-foreground">Registered User Accounts</span>
+                <input 
+                  v-model="userSearch"
+                  type="text" 
+                  placeholder="Filter users..." 
+                  class="h-7 w-44 rounded-md border border-input bg-background px-2 text-[11px] placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground shadow-sm"
+                />
+              </div>
+              <div class="flex items-center gap-1.5">
+                <button 
+                  @click="loginTestModalOpen = true"
+                  class="inline-flex items-center justify-center rounded-md border border-input bg-background h-7 px-2.5 text-[11px] font-medium hover:bg-accent text-foreground shadow-sm"
+                >
+                  <icon name="log-in" class="w-3 h-3 mr-1"></icon> Test User Login
+                </button>
+                <button 
+                  @click="newUserModalOpen = true"
+                  class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground h-7 px-2.5 text-[11px] font-medium shadow hover:bg-primary/90"
+                >
+                  <icon name="user-plus" class="w-3 h-3 mr-1"></icon> Register User
+                </button>
+              </div>
+            </div>
+
+            <!-- Users Table -->
+            <div class="overflow-x-auto">
+              <table class="w-full text-left border-collapse text-[11px]">
+                <thead>
+                  <tr class="border-b border-border bg-muted/30 font-medium text-muted-foreground uppercase text-[10px] tracking-wider">
+                    <th class="py-2 px-3">User ID</th>
+                    <th class="py-2 px-3">Username</th>
+                    <th class="py-2 px-3">Created At</th>
+                    <th class="py-2 px-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-border/60">
+                  <tr v-if="usersLoading">
+                    <td colspan="4" class="py-6 text-center text-muted-foreground text-xs">Loading users...</td>
+                  </tr>
+                  <tr v-else-if="filteredUsers.length === 0">
+                    <td colspan="4" class="py-6 text-center text-muted-foreground text-xs">
+                      No users found. Note: listing users requires backend bearer credential.
+                    </td>
+                  </tr>
+                  <tr v-for="u in filteredUsers" :key="u.id" class="hover:bg-muted/40 transition-colors">
+                    <td class="py-2 px-3 font-mono text-primary">{{ u.id }}</td>
+                    <td class="py-2 px-3 font-semibold text-foreground">{{ u.username }}</td>
+                    <td class="py-2 px-3 text-muted-foreground font-mono">{{ formatDate(u.created_at) }}</td>
+                    <td class="py-2 px-3 text-right">
+                      <button 
+                        @click="deleteUser(u.id)"
+                        class="inline-flex items-center justify-center rounded px-1.5 py-0.5 text-[10px] font-medium border border-destructive/30 bg-destructive/10 hover:bg-destructive/20 text-destructive shadow-sm"
+                      >
+                        Delete User
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- =================== VIEW 5: CONFIG & SETTINGS =================== -->
+        <div v-if="activeNav === 'settings'" class="space-y-6">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- Server Status -->
+            <div class="rounded-xl border border-border bg-card p-5 shadow-sm space-y-4">
+              <h3 class="text-sm font-semibold tracking-tight text-foreground flex items-center gap-2">
+                <icon name="server" class="w-4 h-4 text-teal-600 dark:text-teal-400"></icon>
+                Server Status & Engines
+              </h3>
+
+              <div class="space-y-2.5 text-xs">
+                <div class="flex items-center justify-between p-2.5 rounded bg-muted/30 border border-border">
+                  <span class="text-muted-foreground">Database Engine:</span>
+                  <span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-teal-500/15 text-teal-700 dark:text-teal-300 border border-teal-500/30">
+                    Online (Rust NioDB v0.1.0)
+                  </span>
+                </div>
+
+                <div class="flex items-center justify-between p-2.5 rounded bg-muted/30 border border-border">
+                  <span class="text-muted-foreground">Health Check (/health):</span>
+                  <span :class="['px-2 py-0.5 rounded text-[11px] font-semibold', serverOnline ? 'bg-teal-500/15 text-teal-700 dark:text-teal-300 border border-teal-500/30' : 'bg-destructive/15 text-destructive border border-destructive/30']">
+                    {{ serverOnline ? 'Healthy' : 'Unhealthy' }}
+                  </span>
+                </div>
+
+                <div class="flex items-center justify-between p-2.5 rounded bg-muted/30 border border-border">
+                  <span class="text-muted-foreground">AlaSQL Query Engine:</span>
+                  <span :class="['px-2 py-0.5 rounded text-[11px] font-semibold', alasqlReady ? 'bg-teal-500/15 text-teal-700 dark:text-teal-300 border border-teal-500/30' : 'bg-muted text-muted-foreground border border-border']">
+                    {{ alasqlReady ? 'Ready' : 'Unavailable' }}
+                  </span>
+                </div>
+
+                <div class="flex items-center justify-between p-2.5 rounded bg-muted/30 border border-border">
+                  <span class="text-muted-foreground">Nio CLI Intelligence:</span>
+                  <span :class="['px-2 py-0.5 rounded text-[11px] font-semibold', nioStatus === 'ready' ? 'bg-teal-500/15 text-teal-700 dark:text-teal-300 border border-teal-500/30' : 'bg-muted text-muted-foreground border border-border']">
+                    {{ nioStatus }}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Credentials & Quick Links -->
+            <div class="rounded-xl border border-border bg-card p-5 shadow-sm space-y-4">
+              <h3 class="text-sm font-semibold tracking-tight text-foreground flex items-center gap-2">
+                <icon name="shield" class="w-4 h-4 text-teal-600 dark:text-teal-400"></icon>
+                Console Bearer Authentication
+              </h3>
+              <p class="text-xs text-muted-foreground leading-relaxed">
+                NioDB uses bearer tokens. Set your combined <code>client-token:secret-token</code>, individual token, or session token to authenticate requests.
+              </p>
+              <div class="flex gap-2 pt-2">
+                <button 
+                  @click="tokenModalOpen = true"
+                  class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground font-semibold px-4 h-9 text-xs shadow hover:bg-primary/90"
+                >
+                  Configure Token
+                </button>
+                <button 
+                  @click="testToken()"
+                  class="inline-flex items-center justify-center rounded-md border border-input bg-background h-9 px-3 text-xs font-medium hover:bg-accent text-foreground shadow-sm"
+                >
+                  Test Connection
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Storage Compaction & Maintenance -->
+          <div class="rounded-xl border border-border bg-card p-5 shadow-sm space-y-4">
+            <div class="flex items-center justify-between">
+              <h3 class="text-sm font-semibold tracking-tight text-foreground flex items-center gap-2">
+                <icon name="trash-2" class="w-4 h-4 text-teal-600 dark:text-teal-400"></icon>
+                Storage Engine Compaction & Maintenance (Vacuum)
+              </h3>
+              <button 
+                @click="runVacuum()" 
+                :disabled="vacuumLoading"
+                class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground font-semibold px-4 h-8 text-xs shadow hover:bg-primary/90 transition-colors disabled:opacity-50"
+              >
+                <icon name="refresh-cw" :class="['w-3.5 h-3.5 mr-1.5', vacuumLoading ? 'animate-spin' : '']"></icon>
+                {{ vacuumLoading ? 'Compacting Journal...' : 'Run Vacuum Now' }}
+              </button>
+            </div>
+            <p class="text-xs text-muted-foreground leading-relaxed">
+              Performs atomic append-only journal compaction: purges expired records, removes deleted file manifests and tombstones, and rebuilds the on-disk index with zero downtime.
+            </p>
+            <div v-if="vacuumStats" class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs pt-1">
+              <div class="p-3 rounded-lg border border-border bg-muted/20">
+                <span class="text-muted-foreground text-[11px] block">Initial Disk Size:</span>
+                <span class="font-semibold font-mono text-foreground">{{ formatBytes(vacuumStats.initial_bytes) }}</span>
+              </div>
+              <div class="p-3 rounded-lg border border-border bg-muted/20">
+                <span class="text-muted-foreground text-[11px] block">Compacted Size:</span>
+                <span class="font-semibold font-mono text-teal-700 dark:text-teal-300">{{ formatBytes(vacuumStats.compacted_bytes) }}</span>
+              </div>
+              <div class="p-3 rounded-lg border border-border bg-muted/20">
+                <span class="text-muted-foreground text-[11px] block">Purged Records:</span>
+                <span class="font-semibold font-mono text-foreground">{{ vacuumStats.purged_expired }} expired</span>
+              </div>
+              <div class="p-3 rounded-lg border border-border bg-muted/20">
+                <span class="text-muted-foreground text-[11px] block">Active Artifacts:</span>
+                <span class="font-semibold font-mono text-foreground">{{ vacuumStats.active_artifacts }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Skills & Plugins -->
+          <div class="rounded-xl border border-border bg-card p-5 shadow-sm space-y-4">
+            <h3 class="text-sm font-semibold tracking-tight text-foreground flex items-center gap-2">
+              <icon name="puzzle" class="w-4 h-4 text-teal-600 dark:text-teal-400"></icon>
+              Nio Skills & Plugins Discovery
+            </h3>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+              <div>
+                <h4 class="font-medium text-muted-foreground mb-2 uppercase text-[11px] tracking-wider">Granted Skills</h4>
+                <div v-if="skills.length === 0" class="p-4 rounded-md border border-border bg-muted/20 text-muted-foreground text-center">
+                  No skills granted for current principal.
+                </div>
+                <div v-for="s in skills" :key="s.name" class="p-3 rounded-md border border-border bg-muted/30 mb-2">
+                  <div class="font-semibold text-primary">{{ s.name }}</div>
+                  <div class="text-muted-foreground mt-0.5">{{ s.description }}</div>
+                </div>
+              </div>
+
+              <div>
+                <h4 class="font-medium text-muted-foreground mb-2 uppercase text-[11px] tracking-wider">Discovered Plugins</h4>
+                <div v-if="plugins.length === 0" class="p-4 rounded-md border border-border bg-muted/20 text-muted-foreground text-center">
+                  No plugins discovered.
+                </div>
+                <div v-for="p in plugins" :key="p.name" class="p-3 rounded-md border border-border bg-muted/30 mb-2">
+                  <div class="font-semibold text-primary">{{ p.name }}</div>
+                  <div class="text-muted-foreground mt-0.5">{{ p.description }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- =================== SHADCN DIALOGS / MODALS =================== -->
+
+    <!-- Token Dialog -->
+    <div v-if="tokenModalOpen" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-base font-semibold text-foreground">Configure Bearer Token</h3>
+          <button @click="tokenModalOpen = false" class="text-muted-foreground hover:text-foreground">
+            <icon name="x" class="w-4 h-4"></icon>
+          </button>
+        </div>
+        <p class="text-xs text-muted-foreground">
+          Enter the combined <code>client-token:secret-token</code>, individual token, or a user session token. Stored locally in your browser's localStorage.
+        </p>
+        <div>
+          <label class="block text-xs font-medium text-muted-foreground mb-1.5">Bearer Token</label>
+          <input 
+            v-model="tokenInput"
+            type="password" 
+            placeholder="Paste token here..." 
+            class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-xs font-mono shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+          />
+        </div>
+        <div class="flex justify-between items-center pt-2">
+          <button 
+            @click="clearToken()" 
+            class="text-xs text-muted-foreground hover:text-destructive transition-colors"
+          >
+            Clear Token
+          </button>
+          <div class="space-x-2">
+            <button 
+              @click="tokenModalOpen = false" 
+              class="inline-flex items-center justify-center rounded-md border border-input bg-background h-8 px-3 text-xs font-medium hover:bg-accent text-foreground shadow-sm"
+            >
+              Cancel
+            </button>
+            <button 
+              @click="saveToken()" 
+              class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground font-semibold h-8 px-4 text-xs shadow hover:bg-primary/90"
+            >
+              Save Token
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Record Detail Dialog -->
+    <div v-if="recordDetailModalOpen" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="w-full max-w-2xl rounded-xl border border-border bg-card p-6 shadow-xl space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-base font-semibold text-foreground">Record Details</h3>
+          <button @click="recordDetailModalOpen = false" class="text-muted-foreground hover:text-foreground">
+            <icon name="x" class="w-4 h-4"></icon>
+          </button>
+        </div>
+        <div class="space-y-2">
+          <label class="block text-xs font-medium text-muted-foreground">JSON Document</label>
+          <textarea 
+            :value="JSON.stringify(selectedRecord, null, 2)" 
+            readonly 
+            rows="14" 
+            class="flex w-full rounded-md border border-input bg-muted/40 px-3 py-2 font-mono text-xs shadow-sm text-foreground"
+          ></textarea>
+        </div>
+        <div class="flex justify-end gap-2 pt-2">
+          <button 
+            @click="copySelectedJson()" 
+            class="inline-flex items-center justify-center rounded-md border border-input bg-background h-8 px-3 text-xs font-medium hover:bg-accent text-foreground shadow-sm"
+          >
+            <icon name="copy" class="w-3.5 h-3.5 mr-1.5"></icon> Copy JSON
+          </button>
+          <button 
+            @click="recordDetailModalOpen = false" 
+            class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground font-semibold h-8 px-4 text-xs shadow"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- New Record Dialog -->
+    <div v-if="newRecordModalOpen" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-xl space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-base font-semibold text-foreground">Create New Record</h3>
+          <button @click="newRecordModalOpen = false" class="text-muted-foreground hover:text-foreground">
+            <icon name="x" class="w-4 h-4"></icon>
+          </button>
+        </div>
+        <div class="space-y-3 text-xs">
+          <div>
+            <label class="block font-medium text-muted-foreground mb-1">Collection Name</label>
+            <input 
+              v-model="newRecordKind" 
+              type="text" 
+              placeholder="e.g., users, products, notes"
+              class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+            />
+          </div>
+          <div>
+            <label class="block font-medium text-muted-foreground mb-1">Data (JSON)</label>
+            <textarea 
+              v-model="newRecordData" 
+              rows="8" 
+              class="flex w-full rounded-md border border-input bg-background px-3 py-2 font-mono shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+            ></textarea>
+          </div>
+        </div>
+        <div class="flex justify-end gap-2 pt-2">
+          <button 
+            @click="newRecordModalOpen = false" 
+            class="inline-flex items-center justify-center rounded-md border border-input bg-background h-8 px-3 text-xs font-medium hover:bg-accent text-foreground shadow-sm"
+          >
+            Cancel
+          </button>
+          <button 
+            @click="submitNewRecord()" 
+            class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground font-semibold h-8 px-4 text-xs shadow hover:bg-primary/90"
+          >
+            Create Record
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- New Bucket Dialog -->
+    <div v-if="newBucketModalOpen" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-xl space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-base font-semibold text-foreground">Create Bucket</h3>
+          <button @click="newBucketModalOpen = false" class="text-muted-foreground hover:text-foreground">
+            <icon name="x" class="w-4 h-4"></icon>
+          </button>
+        </div>
+        <div class="space-y-2 text-xs">
+          <label class="block font-medium text-muted-foreground">Bucket Name</label>
+          <input 
+            v-model="newBucketName" 
+            type="text" 
+            placeholder="e.g., assets, avatars"
+            class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+          />
+        </div>
+        <div class="flex justify-end gap-2 pt-2">
+          <button 
+            @click="newBucketModalOpen = false" 
+            class="inline-flex items-center justify-center rounded-md border border-input bg-background h-8 px-3 text-xs font-medium hover:bg-accent text-foreground shadow-sm"
+          >
+            Cancel
+          </button>
+          <button 
+            @click="submitNewBucket()" 
+            class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground font-semibold h-8 px-4 text-xs shadow hover:bg-primary/90"
+          >
+            Create
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Upload File Dialog -->
+    <div v-if="uploadModalOpen" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-base font-semibold text-foreground">Upload to {{ activeBucket }}</h3>
+          <button @click="uploadModalOpen = false" class="text-muted-foreground hover:text-foreground">
+            <icon name="x" class="w-4 h-4"></icon>
+          </button>
+        </div>
+        <div class="space-y-3 text-xs">
+          <div>
+            <label class="block font-medium text-muted-foreground mb-1">Select File</label>
+            <input 
+              type="file" 
+              ref="fileInputRef" 
+              class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 shadow-sm text-foreground"
+            />
+          </div>
+          <div>
+            <label class="block font-medium text-muted-foreground mb-1">Owner User ID (Optional)</label>
+            <input 
+              v-model="uploadUserId" 
+              type="text" 
+              placeholder="e.g., usr_... for private user file"
+              class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+            />
+          </div>
+        </div>
+        <div class="flex justify-end gap-2 pt-2">
+          <button 
+            @click="uploadModalOpen = false" 
+            class="inline-flex items-center justify-center rounded-md border border-input bg-background h-8 px-3 text-xs font-medium hover:bg-accent text-foreground shadow-sm"
+          >
+            Cancel
+          </button>
+          <button 
+            @click="submitUpload()" 
+            :disabled="uploading"
+            class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground font-semibold h-8 px-4 text-xs shadow hover:bg-primary/90"
+          >
+            {{ uploading ? 'Uploading...' : 'Upload' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- New Webhook Dialog -->
+    <div v-if="newWebhookModalOpen" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-base font-semibold text-foreground">Register Webhook</h3>
+          <button @click="newWebhookModalOpen = false" class="text-muted-foreground hover:text-foreground">
+            <icon name="x" class="w-4 h-4"></icon>
+          </button>
+        </div>
+        <div class="space-y-3 text-xs">
+          <div>
+            <label class="block font-medium text-muted-foreground mb-1">Event Name (* for all)</label>
+            <input 
+              v-model="newWebhookEvent" 
+              type="text" 
+              placeholder="* or user.created"
+              class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+            />
+          </div>
+          <div>
+            <label class="block font-medium text-muted-foreground mb-1">Target Webhook URL</label>
+            <input 
+              v-model="newWebhookUrl" 
+              type="url" 
+              placeholder="https://example.com/api/webhook"
+              class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+            />
+          </div>
+        </div>
+        <div class="flex justify-end gap-2 pt-2">
+          <button 
+            @click="newWebhookModalOpen = false" 
+            class="inline-flex items-center justify-center rounded-md border border-input bg-background h-8 px-3 text-xs font-medium hover:bg-accent text-foreground shadow-sm"
+          >
+            Cancel
+          </button>
+          <button 
+            @click="submitNewWebhook()" 
+            class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground font-semibold h-8 px-4 text-xs shadow hover:bg-primary/90"
+          >
+            Register
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- New Worker Dialog -->
+    <div v-if="newWorkerModalOpen" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-xl space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-base font-semibold text-foreground">Register Event Worker</h3>
+          <button @click="newWorkerModalOpen = false" class="text-muted-foreground hover:text-foreground">
+            <icon name="x" class="w-4 h-4"></icon>
+          </button>
+        </div>
+        <div class="space-y-3 text-xs">
+          <div>
+            <label class="block font-medium text-muted-foreground mb-1">Event Name</label>
+            <input 
+              v-model="newWorkerEvent" 
+              type="text" 
+              placeholder="* or record.created"
+              class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+            />
+          </div>
+          <div>
+            <label class="block font-medium text-muted-foreground mb-1">TypeScript / JavaScript Source</label>
+            <textarea 
+              v-model="newWorkerSource" 
+              rows="6" 
+              class="flex w-full rounded-md border border-input bg-background px-3 py-2 font-mono shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+            ></textarea>
+          </div>
+        </div>
+        <div class="flex justify-end gap-2 pt-2">
+          <button 
+            @click="newWorkerModalOpen = false" 
+            class="inline-flex items-center justify-center rounded-md border border-input bg-background h-8 px-3 text-xs font-medium hover:bg-accent text-foreground shadow-sm"
+          >
+            Cancel
+          </button>
+          <button 
+            @click="submitNewWorker()" 
+            class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground font-semibold h-8 px-4 text-xs shadow hover:bg-primary/90"
+          >
+            Register
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- New User Dialog -->
+    <div v-if="newUserModalOpen" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-xl space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-base font-semibold text-foreground">Register User Account</h3>
+          <button @click="newUserModalOpen = false" class="text-muted-foreground hover:text-foreground">
+            <icon name="x" class="w-4 h-4"></icon>
+          </button>
+        </div>
+        <div class="space-y-3 text-xs">
+          <div>
+            <label class="block font-medium text-muted-foreground mb-1">Username</label>
+            <input 
+              v-model="newUsername" 
+              type="text" 
+              placeholder="3-64 chars (a-z, 0-9, .-_)"
+              class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+            />
+          </div>
+          <div>
+            <label class="block font-medium text-muted-foreground mb-1">Password</label>
+            <input 
+              v-model="newUserPassword" 
+              type="password" 
+              placeholder="Min 12 characters"
+              class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+            />
+          </div>
+        </div>
+        <div class="flex justify-end gap-2 pt-2">
+          <button 
+            @click="newUserModalOpen = false" 
+            class="inline-flex items-center justify-center rounded-md border border-input bg-background h-8 px-3 text-xs font-medium hover:bg-accent text-foreground shadow-sm"
+          >
+            Cancel
+          </button>
+          <button 
+            @click="submitNewUser()" 
+            class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground font-semibold h-8 px-4 text-xs shadow hover:bg-primary/90"
+          >
+            Register
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Login Test Dialog -->
+    <div v-if="loginTestModalOpen" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-xl space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-base font-semibold text-foreground">Test User Login</h3>
+          <button @click="loginTestModalOpen = false" class="text-muted-foreground hover:text-foreground">
+            <icon name="x" class="w-4 h-4"></icon>
+          </button>
+        </div>
+        <div class="space-y-3 text-xs">
+          <div>
+            <label class="block font-medium text-muted-foreground mb-1">Username</label>
+            <input 
+              v-model="loginUsername" 
+              type="text" 
+              placeholder="Username"
+              class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+            />
+          </div>
+          <div>
+            <label class="block font-medium text-muted-foreground mb-1">Password</label>
+            <input 
+              v-model="loginPassword" 
+              type="password" 
+              placeholder="Password"
+              class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+            />
+          </div>
+        </div>
+        <div class="flex justify-end gap-2 pt-2">
+          <button 
+            @click="loginTestModalOpen = false" 
+            class="inline-flex items-center justify-center rounded-md border border-input bg-background h-8 px-3 text-xs font-medium hover:bg-accent text-foreground shadow-sm"
+          >
+            Cancel
+          </button>
+          <button 
+            @click="submitTestLogin()" 
+            class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground font-semibold h-8 px-4 text-xs shadow hover:bg-primary/90"
+          >
+            Login & Switch Token
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL: IMPORT SQLITE DATABASE FILE -->
+    <div v-if="sqliteImportModalOpen" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="bg-card border border-border rounded-xl shadow-2xl max-w-lg w-full p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <icon name="database" class="w-5 h-5 text-teal-600 dark:text-teal-400"></icon>
+            <h3 class="text-sm font-semibold tracking-tight text-foreground">Import SQLite Database File</h3>
+          </div>
+          <button @click="sqliteImportModalOpen = false" class="text-muted-foreground hover:text-foreground">
+            <icon name="x" class="w-4 h-4"></icon>
+          </button>
+        </div>
+
+        <p class="text-xs text-muted-foreground">
+          Select a local SQLite database (<span class="font-mono text-foreground">.sqlite</span>, <span class="font-mono text-foreground">.db</span>, <span class="font-mono text-foreground">.sqlite3</span>) to inspect tables and import records directly into NioDB collections.
+        </p>
+
+        <!-- Drop zone / File Input -->
+        <div class="border-2 border-dashed border-border rounded-lg p-5 text-center hover:border-primary/50 transition-colors bg-muted/20">
+          <input 
+            type="file" 
+            ref="sqliteFileInput"
+            accept=".sqlite,.db,.sqlite3,application/x-sqlite3,application/vnd.sqlite3" 
+            @change="handleSqliteFileSelected($event)" 
+            class="hidden" 
+            id="sqlite-file-input"
+          />
+          <label for="sqlite-file-input" class="cursor-pointer flex flex-col items-center justify-center gap-2">
+            <icon name="upload" class="w-7 h-7 text-teal-600 dark:text-teal-400"></icon>
+            <span class="text-xs font-medium text-foreground">
+              {{ selectedSqliteFileName || "Click to browse or choose SQLite file" }}
+            </span>
+            <span class="text-[11px] text-muted-foreground">
+              Official SQLite WebAssembly engine parses tables directly in browser
+            </span>
+          </label>
+        </div>
+
+        <!-- Parsed Tables Checklist -->
+        <div v-if="sqliteTables.length > 0" class="space-y-2">
+          <div class="flex items-center justify-between text-xs">
+            <span class="font-semibold text-foreground">Detected Tables ({{ sqliteTables.length }}):</span>
+            <button @click="toggleAllSqliteTables()" class="text-primary hover:underline text-[11px]">
+              {{ allSqliteTablesSelected ? 'Deselect All' : 'Select All' }}
+            </button>
+          </div>
+
+          <div class="max-h-48 overflow-y-auto space-y-1.5 border border-border rounded-lg p-2 bg-background">
+            <div 
+              v-for="t in sqliteTables" 
+              :key="t.name"
+              class="flex items-center justify-between p-2 rounded-md hover:bg-muted/40 text-xs"
+            >
+              <label class="flex items-center gap-2 cursor-pointer flex-1 min-w-0">
+                <input type="checkbox" v-model="t.selected" class="rounded border-input text-primary focus:ring-primary" />
+                <span class="font-mono font-medium truncate">{{ t.name }}</span>
+                <span class="text-[11px] text-muted-foreground">({{ t.rowCount }} rows)</span>
+              </label>
+              <div class="flex items-center gap-1.5 flex-shrink-0">
+                <span class="text-[11px] text-muted-foreground">Target Collection:</span>
+                <input 
+                  type="text" 
+                  v-model="t.targetCollection"
+                  class="h-6 w-28 rounded border border-input bg-card px-2 text-[11px] font-mono focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Import Progress Bar -->
+        <div v-if="sqliteImporting" class="space-y-1.5">
+          <div class="flex justify-between text-xs text-muted-foreground">
+            <span>{{ sqliteImportStatusText }}</span>
+            <span>{{ Math.round(sqliteImportProgress) }}%</span>
+          </div>
+          <div class="w-full bg-secondary h-2 rounded-full overflow-hidden">
+            <div 
+              class="bg-primary h-full transition-all duration-200" 
+              :style="{ width: sqliteImportProgress + '%' }"
+            ></div>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-end gap-2 pt-2 border-t border-border">
+          <button 
+            @click="sqliteImportModalOpen = false" 
+            :disabled="sqliteImporting"
+            class="px-3 py-1.5 rounded-md border border-input bg-background hover:bg-accent text-xs font-medium transition-colors"
+          >
+            Cancel
+          </button>
+          <button 
+            @click="startSqliteImport()" 
+            :disabled="sqliteTables.filter(t => t.selected).length === 0 || sqliteImporting"
+            class="px-4 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-colors shadow disabled:opacity-50 inline-flex items-center gap-1.5"
+          >
+            <icon v-if="sqliteImporting" name="loader-2" class="w-3.5 h-3.5 animate-spin"></icon>
+            <icon v-else name="upload" class="w-3.5 h-3.5"></icon>
+            <span>{{ sqliteImporting ? 'Importing...' : 'Start Import' }}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- New Session Dialog -->
+    <div v-if="newSessionModalOpen" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-base font-semibold text-foreground">Create NioBridge Session</h3>
+          <button @click="newSessionModalOpen = false" class="text-muted-foreground hover:text-foreground">
+            <icon name="x" class="w-4 h-4"></icon>
+          </button>
+        </div>
+        <div class="space-y-3 text-xs">
+          <div>
+            <label class="block font-medium text-muted-foreground mb-1">Session Title</label>
+            <input 
+              v-model="newSessionTitle" 
+              type="text" 
+              placeholder="e.g., Codebase Architecture Refactor"
+              class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+            />
+          </div>
+          <div>
+            <label class="block font-medium text-muted-foreground mb-1">High-Level Goal</label>
+            <textarea 
+              v-model="newSessionGoal" 
+              rows="3" 
+              placeholder="e.g., Refactor storage engine to pure-Rust SIMD embeddings without crashing"
+              class="flex w-full rounded-md border border-input bg-background px-3 py-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+            ></textarea>
+          </div>
+          <div>
+            <label class="block font-medium text-muted-foreground mb-1">Model Tier</label>
+            <select 
+              v-model="newSessionModelTier" 
+              class="flex h-9 w-full rounded-md border border-input bg-background px-2 shadow-sm text-foreground text-xs"
+            >
+              <option value="strong">Strong (Sonnet 3.7 / Opus / GPT-4o)</option>
+              <option value="fast">Fast (Flash 2.0 / Mini)</option>
+              <option value="local">Local (Ollama / vLLM)</option>
+              <option value="free">Free / Community</option>
+            </select>
+          </div>
+        </div>
+        <div class="flex justify-end gap-2 pt-2">
+          <button 
+            @click="newSessionModalOpen = false" 
+            class="inline-flex items-center justify-center rounded-md border border-input bg-background h-8 px-3 text-xs font-medium hover:bg-accent text-foreground shadow-sm"
+          >
+            Cancel
+          </button>
+          <button 
+            @click="submitNewSession()" 
+            class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground font-semibold h-8 px-4 text-xs shadow hover:bg-primary/90"
+          >
+            Create Session
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- New Task Dialog -->
+    <div v-if="newTaskModalOpen" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-base font-semibold text-foreground">Create Nio0 Task</h3>
+          <button @click="newTaskModalOpen = false" class="text-muted-foreground hover:text-foreground">
+            <icon name="x" class="w-4 h-4"></icon>
+          </button>
+        </div>
+        <div class="space-y-3 text-xs">
+          <div>
+            <label class="block font-medium text-muted-foreground mb-1">Task Title</label>
+            <input 
+              v-model="newTaskTitle" 
+              type="text" 
+              placeholder="e.g., Run ETL Sync Pipeline"
+              class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+            />
+          </div>
+          <div>
+            <label class="block font-medium text-muted-foreground mb-1">Prompt / Instructions</label>
+            <textarea 
+              v-model="newTaskPrompt" 
+              rows="3" 
+              placeholder="e.g., Read source data and transform records"
+              class="flex w-full rounded-md border border-input bg-background px-3 py-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+            ></textarea>
+          </div>
+          <div>
+            <label class="block font-medium text-muted-foreground mb-1">Priority</label>
+            <select 
+              v-model="newTaskPriority" 
+              class="flex h-9 w-full rounded-md border border-input bg-background px-2 shadow-sm text-foreground text-xs"
+            >
+              <option value="low">Low</option>
+              <option value="normal">Normal</option>
+              <option value="high">High</option>
+              <option value="urgent">Urgent</option>
+            </select>
+          </div>
+        </div>
+        <div class="flex justify-end gap-2 pt-2">
+          <button 
+            @click="newTaskModalOpen = false" 
+            class="inline-flex items-center justify-center rounded-md border border-input bg-background h-8 px-3 text-xs font-medium hover:bg-accent text-foreground shadow-sm"
+          >
+            Cancel
+          </button>
+          <button 
+            @click="submitNewTask()" 
+            class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground font-semibold h-8 px-4 text-xs shadow hover:bg-primary/90"
+          >
+            Create Task
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TOAST NOTIFICATIONS CONTAINER -->
+    <div class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
+      <div 
+        v-for="t in toasts" 
+        :key="t.id"
+        :class="[
+          'pointer-events-auto flex items-center gap-2.5 px-4 py-2.5 rounded-lg border text-xs shadow-lg transition-all animate-in fade-in slide-in-from-bottom-2',
+          t.type === 'error' ? 'bg-destructive/10 text-destructive border-destructive/30' :
+          t.type === 'success' ? 'bg-teal-50 dark:bg-teal-950 text-teal-800 dark:text-teal-200 border-teal-300 dark:border-teal-800' :
+          'bg-card text-foreground border-border'
+        ]"
+      >
+        <icon v-if="t.type === 'success'" name="check-circle-2" class="w-4 h-4 text-teal-600 dark:text-teal-400"></icon>
+        <icon v-else-if="t.type === 'error'" name="alert-circle" class="w-4 h-4 text-destructive"></icon>
+        <icon v-else name="info" class="w-4 h-4 text-teal-600 dark:text-teal-400"></icon>
+        <span>{{ t.message }}</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const { createApp, ref, computed, onMounted, h } = Vue;
+
+    // Lucide Icon SVG dictionary
+    const lucideIcons = {
+      "database": '<ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>',
+      "folder": '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>',
+      "zap": '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>',
+      "users": '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path>',
+      "settings": '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>',
+      "server": '<rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line>',
+      "file-code": '<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><polyline points="10 13 8 15 10 17"></polyline><polyline points="14 13 16 15 14 17"></polyline>',
+      "book-open": '<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>',
+      "sun": '<circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path>',
+      "moon": '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path>',
+      "key": '<path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"></path><path d="m21 2-9.6 9.6"></path><circle cx="7.5" cy="16.5" r="5.5"></circle>',
+      "table": '<path d="M12 3v18"></path><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M3 9h18"></path><path d="M3 15h18"></path>',
+      "terminal": '<polyline points="4 17 10 11 4 5"></polyline><line x1="12" x2="20" y1="19" y2="19"></line>',
+      "bot": '<path d="M12 8V4H8"></path><rect width="16" height="12" x="4" y="8" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path>',
+      "search": '<circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path>',
+      "refresh-cw": '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path>',
+      "download": '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" x2="12" y1="15" y2="3"></line>',
+      "plus": '<path d="M5 12h14"></path><path d="M12 5v14"></path>',
+      "loader-2": '<path d="M21 12a9 9 0 1 1-6.219-8.56"></path>',
+      "arrow-right": '<path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path>',
+      "play": '<polygon points="6 3 20 12 6 21 6 3"></polygon>',
+      "file-spreadsheet": '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="M8 13h2"></path><path d="M14 13h2"></path><path d="M8 17h2"></path><path d="M14 17h2"></path>',
+      "sparkles": '<path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"></path><path d="M5 3v4"></path><path d="M19 17v4"></path><path d="M3 5h4"></path><path d="M17 19h4"></path>',
+      "code": '<polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline>',
+      "file": '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path>',
+      "upload": '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" x2="12" y1="3" y2="15"></line>',
+      "activity": '<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.48 12H2"></path>',
+      "send": '<path d="m22 2-7 20-4-9-9-4Z"></path><path d="M22 2 11 13"></path>',
+      "webhook": '<path d="M18 16.98h-5.99c-1.1 0-1.95.94-2.48 1.9A4 4 0 0 1 2 17c.01-.7.2-1.4.57-2"></path><path d="m6 17 3.13-5.78c.53-.97.1-2.18-.5-3.1a4 4 0 1 1 6.89-4.06l3.19 5.74c.54.99 1.63 1.54 2.76 1.4"></path><circle cx="12" cy="12" r="2"></circle>',
+      "cpu": '<rect width="16" height="16" x="4" y="4" rx="2"></rect><rect width="6" height="6" x="9" y="9" rx="1"></rect><path d="M15 2v2"></path><path d="M15 20v2"></path><path d="M2 15h2"></path><path d="M2 9h2"></path><path d="M20 15h2"></path><path d="M20 9h2"></path><path d="M9 2v2"></path><path d="M9 20v2"></path>',
+      "log-in": '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" x2="3" y1="12" y2="12"></line>',
+      "user-plus": '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><line x1="19" x2="19" y1="8" y2="14"></line><line x1="22" x2="16" y1="11" y2="11"></line>',
+      "shield": '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path>',
+      "puzzle": '<path d="M19.439 7.85c-.049-.322-.28-.584-.596-.675l-3.32-.95a2 2 0 0 1-1.39-1.39l-.95-3.32a.75.75 0 0 0-1.436 0l-.95 3.32a2 2 0 0 1-1.39 1.39l-3.32.95a.75.75 0 0 0 0 1.436l3.32.95a2 2 0 0 1 1.39 1.39l.95 3.32a.75.75 0 0 0 1.436 0l.95-3.32a2 2 0 0 1 1.39-1.39l3.32-.95c.316-.09.547-.353.596-.675z"></path>',
+      "x": '<path d="M18 6 6 18"></path><path d="m6 6 12 12"></path>',
+      "copy": '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path>',
+      "check-circle-2": '<path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><path d="m9 12 2 2 4-4"></path>',
+      "alert-circle": '<circle cx="12" cy="12" r="10"></circle><line x1="12" x2="12" y1="8" y2="12"></line><line x1="12" x2="12.01" y1="16" y2="16"></line>',
+      "info": '<circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path>',
+      "target": '<circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle>',
+      "history": '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M12 7v5l4 2"></path>',
+      "list-todo": '<rect x="3" y="5" width="6" height="6" rx="1"></rect><path d="m3 17 2 2 4-4"></path><path d="M13 6h8"></path><path d="M13 12h8"></path><path d="M13 18h8"></path>',
+      "trash-2": '<path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line>',
+      "chevron-down": '<path d="m6 9 6 6 6-6"></path>',
+      "chevrons-up-down": '<path d="m7 15 5 5 5-5"></path><path d="m7 9 5-5 5 5"></path>',
+      "check": '<polyline points="20 6 9 17 4 12"></polyline>'
+    };
+
+    const app = createApp({
+      setup() {
+        // Theme (Light mode by default)
+        const isDark = ref(localStorage.getItem("niodb_theme") === "dark");
+        if (isDark.value) {
+          document.documentElement.classList.add("dark");
+        } else {
+          document.documentElement.classList.remove("dark");
+        }
+
+        const toggleTheme = () => {
+          isDark.value = !isDark.value;
+          if (isDark.value) {
+            document.documentElement.classList.add("dark");
+            localStorage.setItem("niodb_theme", "dark");
+          } else {
+            document.documentElement.classList.remove("dark");
+            localStorage.setItem("niodb_theme", "light");
+          }
+        };
+
+        // Navigation & Titles
+        const activeNav = ref("data");
+        const activeDataTab = ref("browser");
+        const activeEventTab = ref("stream");
+
+        const navTitles = {
+          data: "Data & Query Explorer",
+          files: "Files & Storage Buckets",
+          events: "Live Events & Webhooks",
+          auth: "Auth & User Directory",
+          settings: "Configuration & System Status"
+        };
+
+        // Authentication & Server state
+        const token = ref(localStorage.getItem("niodb_token") || "");
+        const tokenInput = ref(token.value);
+        const tokenModalOpen = ref(false);
+        const serverOnline = ref(false);
+        const alasqlReady = ref(false);
+        const nioStatus = ref("Checking...");
+        const toasts = ref([]);
+
+        // Data Records state
+        const records = ref([]);
+        const recordsLoading = ref(false);
+        const searchFilter = ref("");
+        const collectionFilter = ref("");
+        const collectionDropdownOpen = ref(false);
+        const vectorDropdownOpen = ref(false);
+        const limit = ref(25);
+        const nextCursor = ref(null);
+        const selectedRecord = ref(null);
+        const recordDetailModalOpen = ref(false);
+        const newRecordModalOpen = ref(false);
+        const newRecordKind = ref("");
+        const newRecordData = ref('{\n  "title": "Sample item",\n  "status": "active"\n}');
+
+        const selectCollectionFilter = (col) => {
+          collectionFilter.value = col;
+          collectionDropdownOpen.value = false;
+          loadRecords();
+        };
+
+        const selectVectorCollection = (col) => {
+          vectorSearchCollection.value = col;
+          vectorDropdownOpen.value = false;
+        };
+
+        // SQL Query Studio state
+        const sqlQuery = ref("SELECT * FROM records LIMIT 25;");
+        const sqlLoading = ref(false);
+        const sqlResults = ref([]);
+        const sqlColumns = ref([]);
+        const sqlMetrics = ref("");
+        const sqlError = ref(null);
+
+        // Human Query state
+        const humanPrompt = ref("");
+        const humanLoading = ref(false);
+        const humanAnswer = ref("");
+        const humanQueries = ref([]);
+        const humanError = ref(null);
+
+        // Files state
+        const buckets = ref([]);
+        const activeBucket = ref("");
+        const files = ref([]);
+        const filesLoading = ref(false);
+        const newBucketModalOpen = ref(false);
+        const newBucketName = ref("");
+        const uploadModalOpen = ref(false);
+        const fileInputRef = ref(null);
+        const uploadUserId = ref("");
+        const uploading = ref(false);
+
+        // Events & Webhooks state
+        const streamEvents = ref([]);
+        const streamFilter = ref("");
+        const streamPaused = ref(false);
+        const streamConnected = ref(false);
+        let eventSource = null;
+
+        const publishName = ref("");
+        const publishData = ref('{\n  "message": "Hello from NioDB",\n  "count": 1\n}');
+        const publishLoading = ref(false);
+
+        const webhooks = ref([]);
+        const newWebhookModalOpen = ref(false);
+        const newWebhookEvent = ref("*");
+        const newWebhookUrl = ref("");
+
+        const workers = ref([]);
+        const newWorkerModalOpen = ref(false);
+        const newWorkerEvent = ref("*");
+        const newWorkerSource = ref("export default async function(event) {\n  console.log('Worker event:', event.name);\n}");
+
+        // Auth & Users state
+        const users = ref([]);
+        const usersLoading = ref(false);
+        const userSearch = ref("");
+        const newUserModalOpen = ref(false);
+        const newUsername = ref("");
+        const newUserPassword = ref("");
+        const loginTestModalOpen = ref(false);
+        const loginUsername = ref("");
+        const loginPassword = ref("");
+
+        // Vector Search state
+        const vectorSearchCollection = ref("");
+        const vectorSearchInput = ref("[0.1, 0.2, 0.3, 0.4]");
+        const vectorSearchTopK = ref(5);
+        const vectorSearchMinScore = ref(0.0);
+        const vectorSearchResults = ref([]);
+        const vectorSearchLoading = ref(false);
+        const vectorSearchError = ref(null);
+
+        // Sessions state (NioBridge)
+        const sessionsList = ref([]);
+        const sessionsLoading = ref(false);
+        const selectedSession = ref(null);
+        const newSessionModalOpen = ref(false);
+        const newSessionTitle = ref("");
+        const newSessionGoal = ref("");
+        const newSessionModelTier = ref("strong");
+
+        // Tasks state (Nio0)
+        const tasksList = ref([]);
+        const tasksLoading = ref(false);
+        const newTaskModalOpen = ref(false);
+        const newTaskTitle = ref("");
+        const newTaskPrompt = ref("");
+        const newTaskPriority = ref("normal");
+
+        // Vacuum & Maintenance state
+        const vacuumStats = ref(null);
+        const vacuumLoading = ref(false);
+
+        // Config state
+        const skills = ref([]);
+        const plugins = ref([]);
+
+        // SQLite Import / Export State
+        const sqliteImportModalOpen = ref(false);
+        const selectedSqliteFileName = ref("");
+        const sqliteTables = ref([]);
+        const sqliteImporting = ref(false);
+        const sqliteImportProgress = ref(0);
+        const sqliteImportStatusText = ref("");
+        let loadedSqliteDb = null;
+        let sqlJsInstance = null;
+
+        const getSql = async () => {
+          if (sqlJsInstance) return sqlJsInstance;
+          if (typeof initSqlJs !== "function") {
+            throw new Error("sql.js is loading or unavailable. Please check your internet connection.");
+          }
+          sqlJsInstance = await initSqlJs({
+            locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/${file}`
+          });
+          return sqlJsInstance;
+        };
+
+        // Toast Helper (deduplicated & single active message)
+        const toast = (message, type = "info") => {
+          // If the identical message is already showing, do not duplicate
+          if (toasts.value.some(t => t.message === message)) {
+            return;
+          }
+          // Limit stack to at most 1 active notification for high focus
+          if (toasts.value.length >= 1) {
+            toasts.value.shift();
+          }
+          const id = Date.now() + Math.random();
+          toasts.value.push({ id, message, type });
+          setTimeout(() => {
+            toasts.value = toasts.value.filter(t => t.id !== id);
+          }, 3500);
+        };
+
+        // HTTP Client
+        const api = async (endpoint, options = {}) => {
+          const headers = options.headers || {};
+          if (token.value) {
+            headers["Authorization"] = `Bearer ${token.value}`;
+          }
+          if (!(options.body instanceof FormData) && !headers["Content-Type"]) {
+            headers["Content-Type"] = "application/json";
+          }
+          options.headers = headers;
+          try {
+            const res = await fetch(endpoint, options);
+            if (res.status === 401) {
+              toast("Unauthorized. Please check your Bearer token.", "error");
+            }
+            return res;
+          } catch (e) {
+            console.error("API error", e);
+            toast("Network error connecting to NioDB", "error");
+            throw e;
+          }
+        };
+
+        // Server Health & Status
+        const checkHealth = async () => {
+          try {
+            const res = await fetch("/health");
+            serverOnline.value = res.ok;
+          } catch {
+            serverOnline.value = false;
+          }
+
+          try {
+            const res = await fetch("/api/v1/status");
+            if (res.ok) {
+              const data = await res.json();
+              alasqlReady.value = data.alasql?.status === "ready";
+              nioStatus.value = data.nio?.status || "Unavailable";
+            }
+          } catch {}
+        };
+
+        // Token actions
+        const saveToken = () => {
+          const t = tokenInput.value.trim();
+          token.value = t;
+          localStorage.setItem("niodb_token", t);
+          tokenModalOpen.value = false;
+          toast("Token saved", "success");
+          loadRecords();
+          loadBuckets();
+          loadUsers();
+        };
+
+        const clearToken = () => {
+          token.value = "";
+          tokenInput.value = "";
+          localStorage.removeItem("niodb_token");
+          tokenModalOpen.value = false;
+          toast("Token cleared", "info");
+        };
+
+        const testToken = async () => {
+          try {
+            const res = await api("/api/v1/records?limit=1");
+            if (res.ok) {
+              toast("Token is valid and authorized!", "success");
+            } else {
+              toast("Token authorization failed", "error");
+            }
+          } catch {
+            toast("Connection test failed", "error");
+          }
+        };
+
+        // Data Records
+        const collectionsList = computed(() => {
+          const set = new Set();
+          records.value.forEach(r => {
+            const c = r.collection || r.type;
+            if (c) set.add(c);
+          });
+          return Array.from(set);
+        });
+
+        const filteredRecords = computed(() => {
+          if (!searchFilter.value) return records.value;
+          const q = searchFilter.value.toLowerCase();
+          return records.value.filter(r => JSON.stringify(r).toLowerCase().includes(q));
+        });
+
+        const loadRecords = async (cursor = null) => {
+          recordsLoading.value = true;
+          let url = `/api/v1/records?limit=${limit.value}`;
+          if (collectionFilter.value) url += `&collection=${encodeURIComponent(collectionFilter.value)}`;
+          if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
+
+          try {
+            const res = await api(url);
+            if (res.ok) {
+              const data = await res.json();
+              records.value = data.items || [];
+              nextCursor.value = data.next_cursor || null;
+            } else {
+              records.value = [];
+            }
+          } catch {
+            records.value = [];
+          } finally {
+            recordsLoading.value = false;
+          }
+        };
+
+        const loadNextPage = () => {
+          if (nextCursor.value) loadRecords(nextCursor.value);
+        };
+
+        const viewRecordDetail = (r) => {
+          selectedRecord.value = r;
+          recordDetailModalOpen.value = true;
+        };
+
+        const copySelectedJson = () => {
+          navigator.clipboard.writeText(JSON.stringify(selectedRecord.value, null, 2));
+          toast("JSON copied to clipboard", "success");
+        };
+
+        const openNewRecordModal = () => {
+          newRecordModalOpen.value = true;
+        };
+
+        const submitNewRecord = async () => {
+          let parsed;
+          try {
+            parsed = JSON.parse(newRecordData.value);
+          } catch {
+            toast("Invalid JSON payload", "error");
+            return;
+          }
+
+          try {
+            const res = await api("/api/v1/records", {
+              method: "POST",
+              body: JSON.stringify({
+                collection: newRecordKind.value.trim() || undefined,
+                data: parsed
+              })
+            });
+            if (res.ok) {
+              newRecordModalOpen.value = false;
+              toast("Record created successfully", "success");
+              loadRecords();
+            } else {
+              const err = await res.json().catch(() => ({}));
+              toast(err.error?.message || "Failed to create record", "error");
+            }
+          } catch {
+            toast("Error creating record", "error");
+          }
+        };
+
+        const exportRecords = () => {
+          const blob = new Blob([JSON.stringify(records.value, null, 2)], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `niodb-records-${Date.now()}.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+        };
+
+        // SQLite Export & Import
+        const exportSqlite = async () => {
+          try {
+            toast("Preparing SQLite export...", "info");
+            const SQL = await getSql();
+            const db = new SQL.Database();
+
+            // Fetch records from database
+            let allRecords = [];
+            let cursor = null;
+            let keepFetching = true;
+            let pages = 0;
+            while (keepFetching && pages < 20) {
+              pages++;
+              let url = `/api/v1/records?limit=500`;
+              if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
+              const res = await api(url);
+              if (!res.ok) break;
+              const data = await res.json();
+              const recs = data.items || [];
+              allRecords = allRecords.concat(recs);
+              cursor = data.next_cursor;
+              if (!cursor || recs.length === 0) {
+                keepFetching = false;
+              }
+            }
+
+            if (allRecords.length === 0 && records.value.length > 0) {
+              allRecords = records.value;
+            }
+
+            if (allRecords.length === 0) {
+              toast("No records available to export.", "info");
+              return;
+            }
+
+            // 1. Create master table: niodb_records
+            db.run(`CREATE TABLE IF NOT EXISTS niodb_records (
+              id TEXT PRIMARY KEY,
+              collection TEXT,
+              data TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );`);
+
+            const insertMaster = db.prepare(`INSERT INTO niodb_records (id, collection, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?);`);
+
+            // Group by collection
+            const collectionsMap = {};
+            for (const r of allRecords) {
+              const recId = String(r.id || r.record_id || `rec_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
+              const colName = String(r.collection || r.type || "default");
+              const dataStr = typeof r.data === "string" ? r.data : JSON.stringify(r.data || {});
+              const createdAt = r.created_at || new Date().toISOString();
+              const updatedAt = r.updated_at || createdAt;
+
+              insertMaster.run([recId, colName, dataStr, createdAt, updatedAt]);
+
+              if (!collectionsMap[colName]) collectionsMap[colName] = [];
+              collectionsMap[colName].push({ id: recId, data: r.data || {}, created_at: createdAt });
+            }
+            insertMaster.free();
+
+            // 2. Create individual tables per collection
+            for (const [colName, colRecords] of Object.entries(collectionsMap)) {
+              const tableName = colName.replace(/[^a-zA-Z0-9_]/g, "_") || "records";
+              const colSet = new Set(["id", "created_at"]);
+              for (const r of colRecords) {
+                if (r.data && typeof r.data === "object" && !Array.isArray(r.data)) {
+                  for (const k of Object.keys(r.data)) {
+                    colSet.add(k.replace(/[^a-zA-Z0-9_]/g, "_"));
+                  }
+                }
+              }
+
+              const colList = Array.from(colSet);
+              const colDefs = colList.map(c => `"${c}" TEXT`).join(", ");
+              db.run(`CREATE TABLE IF NOT EXISTS "${tableName}" (${colDefs});`);
+
+              const placeholders = colList.map(() => "?").join(", ");
+              const insertCol = db.prepare(`INSERT INTO "${tableName}" (${colList.map(c => `"${c}"`).join(", ")}) VALUES (${placeholders});`);
+
+              for (const r of colRecords) {
+                const vals = colList.map(c => {
+                  if (c === "id") return r.id;
+                  if (c === "created_at") return r.created_at;
+                  const v = r.data ? r.data[c] : undefined;
+                  if (v === undefined || v === null) return null;
+                  if (typeof v === "object") return JSON.stringify(v);
+                  return String(v);
+                });
+                insertCol.run(vals);
+              }
+              insertCol.free();
+            }
+
+            const binaryArray = db.export();
+            db.close();
+
+            const blob = new Blob([binaryArray], { type: "application/x-sqlite3" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            const dateStr = new Date().toISOString().slice(0, 10);
+            a.href = url;
+            a.download = `niodb_export_${dateStr}.sqlite`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            toast(`Successfully exported ${allRecords.length} records to SQLite file!`, "success");
+          } catch (err) {
+            console.error("SQLite export error:", err);
+            toast("Failed to export SQLite file: " + (err.message || err), "error");
+          }
+        };
+
+        const openSqliteImportModal = () => {
+          sqliteImportModalOpen.value = true;
+          selectedSqliteFileName.value = "";
+          sqliteTables.value = [];
+          sqliteImporting.value = false;
+          sqliteImportProgress.value = 0;
+          if (loadedSqliteDb) {
+            try { loadedSqliteDb.close(); } catch(e){}
+            loadedSqliteDb = null;
+          }
+        };
+
+        const handleSqliteFileSelected = async (event) => {
+          const file = event.target.files?.[0];
+          if (!file) return;
+          selectedSqliteFileName.value = file.name;
+          try {
+            toast("Reading SQLite database file...", "info");
+            const SQL = await getSql();
+            const arrayBuffer = await file.arrayBuffer();
+            const u8 = new Uint8Array(arrayBuffer);
+
+            if (loadedSqliteDb) {
+              try { loadedSqliteDb.close(); } catch(e){}
+            }
+            loadedSqliteDb = new SQL.Database(u8);
+
+            const res = loadedSqliteDb.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';");
+            if (!res || res.length === 0 || !res[0].values) {
+              toast("No user tables found in SQLite database.", "error");
+              sqliteTables.value = [];
+              return;
+            }
+
+            const tables = [];
+            for (const row of res[0].values) {
+              const tableName = row[0];
+              let rowCount = 0;
+              try {
+                const countRes = loadedSqliteDb.exec(`SELECT count(*) FROM "${tableName}";`);
+                if (countRes && countRes[0] && countRes[0].values) {
+                  rowCount = countRes[0].values[0][0];
+                }
+              } catch (e) {
+                console.warn("Count error", e);
+              }
+              tables.push({
+                name: tableName,
+                rowCount: rowCount,
+                targetCollection: tableName === "niodb_records" ? "records" : tableName,
+                selected: true
+              });
+            }
+            sqliteTables.value = tables;
+            toast(`Detected ${tables.length} table(s) in SQLite file.`, "success");
+          } catch (err) {
+            console.error("SQLite parse error:", err);
+            toast("Failed to parse SQLite file: " + (err.message || err), "error");
+          }
+        };
+
+        const allSqliteTablesSelected = computed(() => {
+          return sqliteTables.value.length > 0 && sqliteTables.value.every(t => t.selected);
+        });
+
+        const toggleAllSqliteTables = () => {
+          const target = !allSqliteTablesSelected.value;
+          sqliteTables.value.forEach(t => t.selected = target);
+        };
+
+        const startSqliteImport = async () => {
+          if (!loadedSqliteDb) return;
+          const selected = sqliteTables.value.filter(t => t.selected);
+          if (selected.length === 0) return;
+
+          sqliteImporting.value = true;
+          sqliteImportProgress.value = 0;
+          sqliteImportStatusText.value = "Importing records...";
+
+          let totalImported = 0;
+          try {
+            const totalTables = selected.length;
+            for (let i = 0; i < totalTables; i++) {
+              const table = selected[i];
+              sqliteImportStatusText.value = `Importing "${table.name}" (${table.rowCount} rows)...`;
+
+              const queryRes = loadedSqliteDb.exec(`SELECT * FROM "${table.name}";`);
+              if (queryRes && queryRes[0] && queryRes[0].values) {
+                const columns = queryRes[0].columns;
+                const rows = queryRes[0].values;
+                const targetCol = table.targetCollection.trim() || table.name;
+
+                for (let rIdx = 0; rIdx < rows.length; rIdx++) {
+                  const row = rows[rIdx];
+                  const recordObj = {};
+
+                  if (table.name === "niodb_records") {
+                    const colCol = columns.indexOf("collection");
+                    const dataCol = columns.indexOf("data");
+                    const destCol = (colCol !== -1 && row[colCol]) ? row[colCol] : targetCol;
+                    let payload = {};
+                    if (dataCol !== -1 && row[dataCol]) {
+                      try {
+                        payload = typeof row[dataCol] === "string" ? JSON.parse(row[dataCol]) : row[dataCol];
+                      } catch {
+                        payload = { raw: row[dataCol] };
+                      }
+                    }
+                    await api("/api/v1/records", {
+                      method: "POST",
+                      body: JSON.stringify({
+                        collection: destCol,
+                        data: payload
+                      })
+                    });
+                    totalImported++;
+                  } else {
+                    for (let c = 0; c < columns.length; c++) {
+                      const colName = columns[c];
+                      const val = row[c];
+                      if (val !== null && val !== undefined) {
+                        if (typeof val === "string" && (val.startsWith("{") || val.startsWith("["))) {
+                          try {
+                            recordObj[colName] = JSON.parse(val);
+                          } catch {
+                            recordObj[colName] = val;
+                          }
+                        } else {
+                          recordObj[colName] = val;
+                        }
+                      }
+                    }
+                    await api("/api/v1/records", {
+                      method: "POST",
+                      body: JSON.stringify({
+                        collection: targetCol,
+                        data: recordObj
+                      })
+                    });
+                    totalImported++;
+                  }
+
+                  const overall = ((i + (rIdx + 1) / Math.max(1, rows.length)) / totalTables) * 100;
+                  sqliteImportProgress.value = Math.min(100, overall);
+                }
+              }
+            }
+
+            sqliteImportProgress.value = 100;
+            sqliteImportStatusText.value = "Import completed!";
+            toast(`Successfully imported ${totalImported} records from SQLite file!`, "success");
+            sqliteImportModalOpen.value = false;
+            await loadRecords();
+          } catch (err) {
+            console.error("SQLite import error:", err);
+            toast("SQLite import error: " + (err.message || err), "error");
+          } finally {
+            sqliteImporting.value = false;
+          }
+        };
+
+        // SQL Query Studio
+        const setSqlPreset = (q) => {
+          sqlQuery.value = q;
+          executeSql();
+        };
+
+        const executeSql = async () => {
+          const sql = sqlQuery.value.trim();
+          if (!sql) return;
+          sqlLoading.value = true;
+          sqlError.value = null;
+          const start = performance.now();
+
+          try {
+            const res = await api("/api/v1/query", {
+              method: "POST",
+              body: JSON.stringify({ sql })
+            });
+            const elapsed = Math.round(performance.now() - start);
+
+            if (res.ok) {
+              const data = await res.json();
+              const items = data.items || [];
+              sqlResults.value = items;
+              sqlColumns.value = items.length > 0 ? Object.keys(items[0]) : [];
+              sqlMetrics.value = `${items.length} rows returned in ${elapsed}ms (${data.engine || "alasql"})`;
+            } else {
+              const err = await res.json().catch(() => ({}));
+              sqlError.value = err.error?.message || "Query execution failed";
+              sqlResults.value = [];
+              sqlColumns.value = [];
+              sqlMetrics.value = `Error (${elapsed}ms)`;
+            }
+          } catch (e) {
+            sqlError.value = "Network error during query execution";
+          } finally {
+            sqlLoading.value = false;
+          }
+        };
+
+        const exportSqlCsv = () => {
+          if (!sqlResults.value.length) return;
+          const cols = sqlColumns.value;
+          const csv = [
+            cols.join(","),
+            ...sqlResults.value.map(row => cols.map(c => JSON.stringify(row[c] ?? "")).join(","))
+          ].join("\n");
+          const blob = new Blob([csv], { type: "text/csv" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `niodb-sql-${Date.now()}.csv`;
+          a.click();
+          URL.revokeObjectURL(url);
+        };
+
+        // Human Query
+        const askHuman = async () => {
+          const prompt = humanPrompt.value.trim();
+          if (!prompt) return;
+          humanLoading.value = true;
+          humanError.value = null;
+          humanAnswer.value = "";
+          humanQueries.value = [];
+
+          try {
+            const res = await api("/api/v1/assist", {
+              method: "POST",
+              body: JSON.stringify({ message: prompt })
+            });
+            if (res.ok) {
+              const data = await res.json();
+              humanAnswer.value = data.message || "Done.";
+              humanQueries.value = data.queries || [];
+            } else {
+              const err = await res.json().catch(() => ({}));
+              humanError.value = err.error?.message || "Assistance unavailable";
+            }
+          } catch {
+            humanError.value = "Failed to communicate with Nio assistant";
+          } finally {
+            humanLoading.value = false;
+          }
+        };
+
+        // Files & Buckets
+        const loadBuckets = async () => {
+          try {
+            const res = await api("/api/v1/storage");
+            if (res.ok) {
+              const data = await res.json();
+              buckets.value = data.items || [];
+              if (!activeBucket.value && buckets.value.length > 0) {
+                selectBucket(buckets.value[0].name);
+              }
+            }
+          } catch {}
+        };
+
+        const selectBucket = (name) => {
+          activeBucket.value = name;
+          loadFiles();
+        };
+
+        const loadFiles = async () => {
+          if (!activeBucket.value) return;
+          filesLoading.value = true;
+          try {
+            const res = await api(`/api/v1/storage/${encodeURIComponent(activeBucket.value)}`);
+            if (res.ok) {
+              const data = await res.json();
+              files.value = data.items || [];
+            } else {
+              files.value = [];
+            }
+          } catch {
+            files.value = [];
+          } finally {
+            filesLoading.value = false;
+          }
+        };
+
+        const submitNewBucket = async () => {
+          const name = newBucketName.value.trim().toLowerCase();
+          if (!name) return;
+          try {
+            const res = await api("/api/v1/storage", {
+              method: "POST",
+              body: JSON.stringify({ name })
+            });
+            if (res.ok) {
+              newBucketModalOpen.value = false;
+              newBucketName.value = "";
+              toast(`Bucket '${name}' created`, "success");
+              loadBuckets();
+            } else {
+              const err = await res.json().catch(() => ({}));
+              toast(err.error?.message || "Failed to create bucket", "error");
+            }
+          } catch {
+            toast("Error creating bucket", "error");
+          }
+        };
+
+        const openUploadModal = () => {
+          if (!activeBucket.value) {
+            toast("Select or create a bucket first", "warning");
+            return;
+          }
+          uploadModalOpen.value = true;
+        };
+
+        const submitUpload = async () => {
+          const input = fileInputRef.value;
+          if (!input || !input.files.length) {
+            toast("Select a file to upload", "warning");
+            return;
+          }
+          const file = input.files[0];
+          uploading.value = true;
+
+          const formData = new FormData();
+          formData.append("file", file);
+
+          let url = `/api/v1/storage/${encodeURIComponent(activeBucket.value)}/upload`;
+          if (uploadUserId.value.trim()) {
+            url += `?user_id=${encodeURIComponent(uploadUserId.value.trim())}`;
+          }
+
+          try {
+            const res = await api(url, {
+              method: "POST",
+              body: formData
+            });
+            if (res.ok) {
+              uploadModalOpen.value = false;
+              input.value = "";
+              uploadUserId.value = "";
+              toast("File uploaded successfully", "success");
+              loadFiles();
+            } else {
+              const err = await res.json().catch(() => ({}));
+              toast(err.error?.message || "Upload failed", "error");
+            }
+          } catch {
+            toast("Error uploading file", "error");
+          } finally {
+            uploading.value = false;
+          }
+        };
+
+        const deleteFile = async (id) => {
+          if (!confirm("Delete this file permanently?")) return;
+          try {
+            const res = await api(`/api/v1/storage/${encodeURIComponent(activeBucket.value)}/${encodeURIComponent(id)}`, {
+              method: "DELETE"
+            });
+            if (res.ok) {
+              toast("File deleted", "success");
+              loadFiles();
+            } else {
+              toast("Failed to delete file", "error");
+            }
+          } catch {
+            toast("Error deleting file", "error");
+          }
+        };
+
+        // Events & SSE Stream
+        const initStream = () => {
+          try {
+            eventSource = new EventSource("/api/v1/events/stream");
+            eventSource.onopen = () => {
+              streamConnected.value = true;
+            };
+            eventSource.onmessage = (e) => {
+              if (streamPaused.value) return;
+              try {
+                const data = JSON.parse(e.data);
+                streamEvents.value.unshift({
+                  name: data.name || "event",
+                  data: data.data || data,
+                  time: new Date().toLocaleTimeString()
+                });
+              } catch {
+                streamEvents.value.unshift({
+                  name: "message",
+                  data: e.data,
+                  time: new Date().toLocaleTimeString()
+                });
+              }
+              if (streamEvents.value.length > 100) streamEvents.value.pop();
+            };
+            eventSource.onerror = () => {
+              streamConnected.value = false;
+            };
+          } catch {
+            streamConnected.value = false;
+          }
+        };
+
+        const filteredStreamEvents = computed(() => {
+          if (!streamFilter.value) return streamEvents.value;
+          const q = streamFilter.value.toLowerCase();
+          return streamEvents.value.filter(e => (e.name || "").toLowerCase().includes(q));
+        });
+
+        const publishEvent = async () => {
+          const name = publishName.value.trim();
+          if (!name) return;
+          let parsed;
+          try {
+            parsed = JSON.parse(publishData.value);
+          } catch {
+            toast("Invalid JSON payload", "error");
+            return;
+          }
+          publishLoading.value = true;
+          try {
+            const res = await api("/api/v1/events", {
+              method: "POST",
+              body: JSON.stringify({ name, data: parsed })
+            });
+            if (res.ok) {
+              toast(`Event '${name}' published`, "success");
+            } else {
+              const err = await res.json().catch(() => ({}));
+              toast(err.error?.message || "Publish failed", "error");
+            }
+          } catch {
+            toast("Error publishing event", "error");
+          } finally {
+            publishLoading.value = false;
+          }
+        };
+
+        const loadWebhooks = async () => {
+          try {
+            const res = await api("/api/v1/webhooks");
+            if (res.ok) {
+              const data = await res.json();
+              webhooks.value = data.items || [];
+            }
+          } catch {}
+        };
+
+        const submitNewWebhook = async () => {
+          const event_name = newWebhookEvent.value.trim();
+          const url = newWebhookUrl.value.trim();
+          if (!event_name || !url) return;
+          try {
+            const res = await api("/api/v1/webhooks", {
+              method: "POST",
+              body: JSON.stringify({ event_name, url })
+            });
+            if (res.ok) {
+              newWebhookModalOpen.value = false;
+              newWebhookUrl.value = "";
+              toast("Webhook registered", "success");
+              loadWebhooks();
+            } else {
+              const err = await res.json().catch(() => ({}));
+              toast(err.error?.message || "Failed to register webhook", "error");
+            }
+          } catch {
+            toast("Error registering webhook", "error");
+          }
+        };
+
+        const deleteWebhook = async (id) => {
+          if (!confirm("Delete this webhook?")) return;
+          try {
+            const res = await api(`/api/v1/webhooks/${encodeURIComponent(id)}`, { method: "DELETE" });
+            if (res.ok) {
+              toast("Webhook deleted", "success");
+              loadWebhooks();
+            } else {
+              toast("Failed to delete webhook", "error");
+            }
+          } catch {
+            toast("Error deleting webhook", "error");
+          }
+        };
+
+        const loadWorkers = async () => {
+          try {
+            const res = await api("/api/v1/events/workers");
+            if (res.ok) {
+              const data = await res.json();
+              workers.value = data.items || [];
+            }
+          } catch {}
+        };
+
+        const submitNewWorker = async () => {
+          const event_name = newWorkerEvent.value.trim();
+          const source = newWorkerSource.value.trim();
+          if (!event_name || !source) return;
+          try {
+            const res = await api("/api/v1/events/workers", {
+              method: "POST",
+              body: JSON.stringify({ event_name, source })
+            });
+            if (res.ok) {
+              newWorkerModalOpen.value = false;
+              toast("Worker registered", "success");
+              loadWorkers();
+            } else {
+              const err = await res.json().catch(() => ({}));
+              toast(err.error?.message || "Failed to register worker", "error");
+            }
+          } catch {
+            toast("Error registering worker", "error");
+          }
+        };
+
+        const deleteWorker = async (id) => {
+          if (!confirm("Delete this worker?")) return;
+          try {
+            const res = await api(`/api/v1/events/workers/${encodeURIComponent(id)}`, { method: "DELETE" });
+            if (res.ok) {
+              toast("Worker deleted", "success");
+              loadWorkers();
+            } else {
+              toast("Failed to delete worker", "error");
+            }
+          } catch {
+            toast("Error deleting worker", "error");
+          }
+        };
+
+        // Auth & Users
+        const filteredUsers = computed(() => {
+          if (!userSearch.value) return users.value;
+          const q = userSearch.value.toLowerCase();
+          return users.value.filter(u => u.username.toLowerCase().includes(q) || u.id.toLowerCase().includes(q));
+        });
+
+        const loadUsers = async () => {
+          usersLoading.value = true;
+          try {
+            const res = await api("/api/v1/auth/users");
+            if (res.ok) {
+              const data = await res.json();
+              users.value = data.users || [];
+            } else {
+              users.value = [];
+            }
+          } catch {
+            users.value = [];
+          } finally {
+            usersLoading.value = false;
+          }
+        };
+
+        const submitNewUser = async () => {
+          const username = newUsername.value.trim();
+          const password = newUserPassword.value;
+          if (!username || !password) {
+            toast("Username and password required", "warning");
+            return;
+          }
+          try {
+            const res = await api("/api/v1/auth/register", {
+              method: "POST",
+              body: JSON.stringify({ username, password })
+            });
+            if (res.ok) {
+              newUserModalOpen.value = false;
+              newUsername.value = "";
+              newUserPassword.value = "";
+              toast(`User '${username}' registered`, "success");
+              loadUsers();
+            } else {
+              const err = await res.json().catch(() => ({}));
+              toast(err.error?.message || "Failed to register user", "error");
+            }
+          } catch {
+            toast("Error registering user", "error");
+          }
+        };
+
+        const deleteUser = async (id) => {
+          if (!confirm(`Delete user ${id}? This permanently revokes their sessions and linked files.`)) return;
+          try {
+            const res = await api(`/api/v1/auth/users/${encodeURIComponent(id)}`, { method: "DELETE" });
+            if (res.ok) {
+              toast("User deleted", "success");
+              loadUsers();
+            } else {
+              toast("Failed to delete user", "error");
+            }
+          } catch {
+            toast("Error deleting user", "error");
+          }
+        };
+
+        const submitTestLogin = async () => {
+          const username = loginUsername.value.trim();
+          const password = loginPassword.value;
+          if (!username || !password) return;
+          try {
+            const res = await fetch("/api/v1/auth/login", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ username, password })
+            });
+            if (res.ok) {
+              const data = await res.json();
+              loginTestModalOpen.value = false;
+              loginUsername.value = "";
+              loginPassword.value = "";
+              token.value = data.access_token;
+              tokenInput.value = data.access_token;
+              localStorage.setItem("niodb_token", data.access_token);
+              toast(`Logged in as ${username}. Session token set!`, "success");
+              loadRecords();
+            } else {
+              const err = await res.json().catch(() => ({}));
+              toast(err.error?.message || "Login failed", "error");
+            }
+          } catch {
+            toast("Login error", "error");
+          }
+        };
+
+        // Vector Search
+        const executeVectorSearch = async () => {
+          vectorSearchLoading.value = true;
+          vectorSearchError.value = null;
+          vectorSearchResults.value = [];
+          try {
+            let vec = [];
+            const raw = vectorSearchInput.value.trim();
+            if (raw.startsWith("[")) {
+              vec = JSON.parse(raw);
+            } else {
+              vec = raw.split(",").map(n => parseFloat(n.trim())).filter(n => !isNaN(n));
+            }
+            if (!Array.isArray(vec) || vec.length === 0) {
+              vectorSearchError.value = "Vector must be a non-empty array of numbers.";
+              vectorSearchLoading.value = false;
+              return;
+            }
+            const res = await api("/api/v1/records/search", {
+              method: "POST",
+              body: JSON.stringify({
+                collection: vectorSearchCollection.value || undefined,
+                vector: vec,
+                top_k: vectorSearchTopK.value || 5,
+                min_score: vectorSearchMinScore.value || 0.0
+              })
+            });
+            if (res.ok) {
+              const data = await res.json();
+              vectorSearchResults.value = data.items || [];
+              if (vectorSearchResults.value.length === 0) {
+                toast("No records matched the vector search criteria.", "info");
+              }
+            } else {
+              const err = await res.json().catch(() => ({}));
+              vectorSearchError.value = err.error?.message || "Vector search failed.";
+            }
+          } catch (e) {
+            vectorSearchError.value = e.message || "Vector search error";
+          } finally {
+            vectorSearchLoading.value = false;
+          }
+        };
+
+        // NioBridge Sessions
+        const loadSessions = async () => {
+          sessionsLoading.value = true;
+          try {
+            const res = await api("/api/v1/sessions");
+            if (res.ok) {
+              const data = await res.json();
+              sessionsList.value = data.items || [];
+              if (sessionsList.value.length > 0 && !selectedSession.value) {
+                selectSession(sessionsList.value[0]);
+              }
+            }
+          } catch {}
+          finally { sessionsLoading.value = false; }
+        };
+
+        const selectSession = async (sess) => {
+          selectedSession.value = sess;
+          try {
+            const res = await api(`/api/v1/sessions/${encodeURIComponent(sess.id)}`);
+            if (res.ok) {
+              const full = await res.json();
+              selectedSession.value = full;
+            }
+          } catch {}
+        };
+
+        const openNewSessionModal = () => {
+          newSessionModalOpen.value = true;
+          newSessionTitle.value = "";
+          newSessionGoal.value = "";
+          newSessionModelTier.value = "strong";
+        };
+
+        const submitNewSession = async () => {
+          if (!newSessionTitle.value.trim()) {
+            toast("Please enter a session title", "error");
+            return;
+          }
+          try {
+            const res = await api("/api/v1/sessions", {
+              method: "POST",
+              body: JSON.stringify({
+                title: newSessionTitle.value.trim(),
+                goal: newSessionGoal.value.trim(),
+                model_tier: newSessionModelTier.value
+              })
+            });
+            if (res.ok) {
+              newSessionModalOpen.value = false;
+              toast("Session created successfully", "success");
+              await loadSessions();
+            } else {
+              const err = await res.json().catch(() => ({}));
+              toast(err.error?.message || "Failed to create session", "error");
+            }
+          } catch {
+            toast("Error creating session", "error");
+          }
+        };
+
+        // Nio0 Tasks
+        const loadTasks = async () => {
+          tasksLoading.value = true;
+          try {
+            const res = await api("/api/v1/tasks");
+            if (res.ok) {
+              const data = await res.json();
+              tasksList.value = data.items || [];
+            }
+          } catch {}
+          finally { tasksLoading.value = false; }
+        };
+
+        const openNewTaskModal = () => {
+          newTaskModalOpen.value = true;
+          newTaskTitle.value = "";
+          newTaskPrompt.value = "";
+          newTaskPriority.value = "normal";
+        };
+
+        const submitNewTask = async () => {
+          if (!newTaskTitle.value.trim()) {
+            toast("Please enter a task title", "error");
+            return;
+          }
+          try {
+            const res = await api("/api/v1/tasks", {
+              method: "POST",
+              body: JSON.stringify({
+                title: newTaskTitle.value.trim(),
+                prompt: newTaskPrompt.value.trim(),
+                priority: newTaskPriority.value
+              })
+            });
+            if (res.ok) {
+              newTaskModalOpen.value = false;
+              toast("Task created successfully", "success");
+              await loadTasks();
+            } else {
+              const err = await res.json().catch(() => ({}));
+              toast(err.error?.message || "Failed to create task", "error");
+            }
+          } catch {
+            toast("Error creating task", "error");
+          }
+        };
+
+        // Vacuum & Maintenance
+        const runVacuum = async () => {
+          vacuumLoading.value = true;
+          try {
+            const res = await api("/api/v1/admin/vacuum", { method: "POST", body: "{}" });
+            if (res.ok) {
+              const data = await res.json();
+              vacuumStats.value = data.stats;
+              toast(`Vacuum complete: journal reduced to ${formatBytes(data.stats.compacted_bytes)}`, "success");
+              loadRecords();
+            } else {
+              const err = await res.json().catch(() => ({}));
+              toast(err.error?.message || "Vacuum failed", "error");
+            }
+          } catch {
+            toast("Error running vacuum", "error");
+          } finally {
+            vacuumLoading.value = false;
+          }
+        };
+
+        // Config & Skills
+        const loadSkillsAndPlugins = async () => {
+          try {
+            const sRes = await api("/api/v1/skills");
+            if (sRes.ok) {
+              const data = await sRes.json();
+              skills.value = data.items || [];
+            }
+            const pRes = await api("/api/v1/plugins");
+            if (pRes.ok) {
+              const data = await pRes.json();
+              plugins.value = data.items || [];
+            }
+          } catch {}
+        };
+
+        // Utilities
+        const formatDate = (iso) => {
+          if (!iso) return "";
+          try {
+            return new Date(iso).toLocaleString();
+          } catch {
+            return iso;
+          }
+        };
+
+        const formatBytes = (bytes) => {
+          if (bytes === 0) return '0 B';
+          const k = 1024;
+          const sizes = ['B', 'KB', 'MB', 'GB'];
+          const i = Math.floor(Math.log(bytes) / Math.log(k));
+          return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        };
+
+        const formatTableCell = (val) => {
+          if (val === null || val === undefined) return "NULL";
+          if (typeof val === "object") return JSON.stringify(val);
+          return String(val);
+        };
+
+        onMounted(() => {
+          checkHealth();
+          loadRecords();
+          loadBuckets();
+          loadWebhooks();
+          loadWorkers();
+          loadUsers();
+          loadSkillsAndPlugins();
+          initStream();
+
+          window.addEventListener('click', (e) => {
+            if (!e.target.closest('#collection-filter-combobox')) {
+              collectionDropdownOpen.value = false;
+            }
+            if (!e.target.closest('#vector-collection-combobox')) {
+              vectorDropdownOpen.value = false;
+            }
+          });
+        });
+
+        return {
+          isDark,
+          toggleTheme,
+          activeNav,
+          activeDataTab,
+          activeEventTab,
+          navTitles,
+          token,
+          tokenInput,
+          tokenModalOpen,
+          saveToken,
+          clearToken,
+          testToken,
+          serverOnline,
+          alasqlReady,
+          nioStatus,
+          toasts,
+          // Records
+          records,
+          recordsLoading,
+          searchFilter,
+          collectionFilter,
+          collectionDropdownOpen,
+          vectorDropdownOpen,
+          selectCollectionFilter,
+          selectVectorCollection,
+          collectionsList,
+          filteredRecords,
+          limit,
+          nextCursor,
+          loadRecords,
+          loadNextPage,
+          selectedRecord,
+          recordDetailModalOpen,
+          viewRecordDetail,
+          copySelectedJson,
+          newRecordModalOpen,
+          newRecordKind,
+          newRecordData,
+          openNewRecordModal,
+          submitNewRecord,
+          exportRecords,
+          // Vector Search
+          vectorSearchCollection,
+          vectorSearchInput,
+          vectorSearchTopK,
+          vectorSearchMinScore,
+          vectorSearchResults,
+          vectorSearchLoading,
+          vectorSearchError,
+          executeVectorSearch,
+          // Sessions
+          sessionsList,
+          sessionsLoading,
+          selectedSession,
+          selectSession,
+          loadSessions,
+          newSessionModalOpen,
+          newSessionTitle,
+          newSessionGoal,
+          newSessionModelTier,
+          openNewSessionModal,
+          submitNewSession,
+          // Tasks
+          tasksList,
+          tasksLoading,
+          loadTasks,
+          newTaskModalOpen,
+          newTaskTitle,
+          newTaskPrompt,
+          newTaskPriority,
+          openNewTaskModal,
+          submitNewTask,
+          // Vacuum
+          vacuumStats,
+          vacuumLoading,
+          runVacuum,
+          // SQLite
+          exportSqlite,
+          sqliteImportModalOpen,
+          selectedSqliteFileName,
+          sqliteTables,
+          sqliteImporting,
+          sqliteImportProgress,
+          sqliteImportStatusText,
+          openSqliteImportModal,
+          handleSqliteFileSelected,
+          allSqliteTablesSelected,
+          toggleAllSqliteTables,
+          startSqliteImport,
+          // SQL
+          sqlQuery,
+          sqlLoading,
+          sqlResults,
+          sqlColumns,
+          sqlMetrics,
+          sqlError,
+          setSqlPreset,
+          executeSql,
+          exportSqlCsv,
+          // Human
+          humanPrompt,
+          humanLoading,
+          humanAnswer,
+          humanQueries,
+          humanError,
+          askHuman,
+          // Files
+          buckets,
+          activeBucket,
+          selectBucket,
+          files,
+          filesLoading,
+          loadFiles,
+          newBucketModalOpen,
+          newBucketName,
+          submitNewBucket,
+          uploadModalOpen,
+          openUploadModal,
+          fileInputRef,
+          uploadUserId,
+          uploading,
+          submitUpload,
+          deleteFile,
+          // Events
+          streamEvents,
+          streamFilter,
+          streamPaused,
+          streamConnected,
+          filteredStreamEvents,
+          publishName,
+          publishData,
+          publishLoading,
+          publishEvent,
+          webhooks,
+          newWebhookModalOpen,
+          newWebhookEvent,
+          newWebhookUrl,
+          submitNewWebhook,
+          deleteWebhook,
+          workers,
+          newWorkerModalOpen,
+          newWorkerEvent,
+          newWorkerSource,
+          submitNewWorker,
+          deleteWorker,
+          // Auth
+          users,
+          usersLoading,
+          userSearch,
+          filteredUsers,
+          loadUsers,
+          newUserModalOpen,
+          newUsername,
+          newUserPassword,
+          submitNewUser,
+          deleteUser,
+          loginTestModalOpen,
+          loginUsername,
+          loginPassword,
+          submitTestLogin,
+          // Config
+          skills,
+          plugins,
+          // Utils
+          formatDate,
+          formatBytes,
+          formatTableCell
+        };
+      }
+    });
+
+    // Native Vue Lucide Icon component
+    app.component('icon', {
+      props: {
+        name: { type: String, required: true },
+        class: { type: String, default: 'w-4 h-4' }
+      },
+      setup(props) {
+        return () => h('svg', {
+          xmlns: 'http://www.w3.org/2000/svg',
+          viewBox: '0 0 24 24',
+          fill: 'none',
+          stroke: 'currentColor',
+          'stroke-width': '2',
+          'stroke-linecap': 'round',
+          'stroke-linejoin': 'round',
+          class: props.class,
+          innerHTML: lucideIcons[props.name] || ''
+        });
+      }
+    });
+
+    app.mount("#app");
+  </script>
+</body>
+</html>

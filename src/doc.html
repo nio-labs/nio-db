@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="referrer" content="no-referrer">
+    <title>NioDB — The Agentic DB that works. — API documentation</title>
+    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.33.1/swagger-ui.css" crossorigin="anonymous">
+    <style>
+      body { margin: 0; background: #fafafa; }
+      header { padding: 20px max(20px, calc((100% - 1460px) / 2)); font: 14px/1.6 system-ui, sans-serif; border-bottom: 1px solid #ddd; }
+      header strong { font-size: 20px; }
+      header p { margin: 6px 0 0; }
+      header a { color: #175cd3; }
+      #load-error { color: #b42318; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>NioDB — The Agentic DB that works.</strong>
+      <p>A lightweight database with natural-language queries, powered by Nio.</p>
+      <p>Explore the API and try requests against this server. Use <b>Authorize</b> to enter your bearer token.</p>
+      <a href="/docs/">Guides</a> · <a href="/openapi.yaml">OpenAPI specification</a>
+      <p id="load-error" hidden>Swagger UI could not load. Check your internet connection and reload.</p>
+    </header>
+    <div id="swagger-ui"></div>
+    <noscript>Enable JavaScript to view interactive API documentation.</noscript>
+    <script src="https://unpkg.com/swagger-ui-dist@5.33.1/swagger-ui-bundle.js" crossorigin="anonymous"></script>
+    <script>
+      if (typeof SwaggerUIBundle === "undefined") {
+        document.getElementById("load-error").hidden = false;
+      } else {
+        SwaggerUIBundle({
+          url: "/openapi.yaml",
+          dom_id: "#swagger-ui",
+          deepLinking: true,
+          displayRequestDuration: true,
+          defaultModelsExpandDepth: -1,
+          persistAuthorization: false,
+          queryConfigEnabled: false,
+          validatorUrl: null,
+          supportedSubmitMethods: ["get", "post"],
+          presets: [SwaggerUIBundle.presets.apis],
+          layout: "BaseLayout"
+        });
+      }
+    </script>
+  </body>
+</html>
