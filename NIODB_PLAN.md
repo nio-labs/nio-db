@@ -4,7 +4,7 @@ _A lightweight database with natural-language queries, powered by Nio._
 
 ## Agreed direction
 
-NioDB is a standalone Rust server distributed through a small npm launcher, ultimately `npx @nio-labs/nio-db`. It serves Nio, NioBridge, Nio0, NioOS and independent web/mobile applications over HTTP. There is no embedded client store.
+NioDB is a standalone Rust server distributed through a small npm launcher, ultimately `npx @nio-labs/nio-db`. It serves Nio and independent web/mobile applications over HTTP. There is no embedded client store.
 
 Nio CLI is the intelligence layer: human-language interpretation, clarification, retrieval planning, summaries and grounded answers. AlaSQL is mandatory and runs through a bounded Node helper. JSON provides HTTP interoperability. TOON provides readable artifact projections; the initial recovery authority is a checksummed JSONL journal. A full TOON codec and import contract remain future work.
 
@@ -13,7 +13,7 @@ The historical vision is preserved in [NIODB_ORIGINAL_VISION.md](docs/NIODB_ORIG
 ## Architecture
 
 ```text
-Nio / NioBridge / Nio0 / NioOS / web and mobile apps
+Nio / AI agents / web and mobile apps
                          |
                    authenticated HTTP
                          |
@@ -59,7 +59,7 @@ Future Nio mutations require a concrete preview, explicit approval, revision che
 
 All Nio products use the same authenticated server API and this server’s shared database. Each server has one workspace. APIs and setup prompts do not expose or require workspace IDs. Existing internal scopes are retained for journal compatibility; startup rejects credentials spanning multiple distinct workspaces. Conversations and idempotency are scoped to principal/workspace. Product-specific records use collection names and JSON data fields; storage internals are not client APIs.
 
-NioBridge integrations will need retry/idempotency and event contracts. Nio0/NioOS file and media use cases depend on managed blobs and capability execution contracts. Nio CLI compatibility is checked at startup; provider connectivity is established by actual assistance calls rather than inferred from configuration.
+Integrations will use retry/idempotency and event contracts. File and media use cases depend on managed blobs and capability execution contracts. Nio CLI compatibility is checked at startup; provider connectivity is established by actual assistance calls rather than inferred from configuration.
 
 ## Next phases
 

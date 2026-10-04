@@ -2,7 +2,7 @@
 
 _A lightweight database with natural-language queries, powered by Nio._
 
-NioDB is a standalone Rust server. Nio, NioBridge, Nio0, NioOS, and web/mobile applications connect over HTTP. Nio CLI supplies natural-language interpretation and grounded answers. AlaSQL is required for SQL and natural-language query execution, using a bounded Node subprocess.
+NioDB is a standalone Rust server. Nio and web/mobile applications connect over HTTP. Nio CLI supplies natural-language interpretation and grounded answers. AlaSQL is required for SQL and natural-language query execution, using a bounded Node subprocess.
 
 ## Current implementation
 

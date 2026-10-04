@@ -380,8 +380,8 @@
 
       <strong>Agent & Tools</strong>
       <!--
-      <a href="#sessions">Sessions & Memory (NioBridge)</a>
-      <a href="#tasks">Tasks & Lifecycle (Nio0)</a>
+      <a href="#sessions">Sessions & Memory</a>
+      <a href="#tasks">Tasks & Lifecycle</a>
       -->
       <a href="#mcp">MCP & Tool Schemas</a>
 
@@ -687,7 +687,7 @@ curl http://127.0.0.1:7432/api/v1/status \
   -d '{"message": "How many tasks are currently pending in our database?"}'</code></pre>
 
       <!-- SECTION 8 & 9 (COMMENTED OUT)
-      <h2 id="sessions">8. Multi-Agent Multiplexing (NioBridge)</h2>
+      <h2 id="sessions">8. Multi-Agent Multiplexing & Sessions</h2>
       <p>Designed specifically to coordinate multiple agents working on complex tasks without losing context or looping into dead ends.</p>
 
       <h3><span class="method post">POST</span> /api/v1/sessions — Create Multi-Agent Session</h3>
@@ -725,7 +725,7 @@ curl http://127.0.0.1:7432/api/v1/status \
     "agent": "researcher"
   }'</code></pre>
 
-      <h2 id="tasks">9. Workflow Automation & Tasks (Nio0)</h2>
+      <h2 id="tasks">9. Workflow Automation & Tasks</h2>
       <p>Track background task lifecycles, execution logs, and subscribe to real-time execution streams via SSE.</p>
 
       <h3><span class="method post">POST</span> /api/v1/tasks — Create Task</h3>

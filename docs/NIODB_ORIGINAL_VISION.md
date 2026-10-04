@@ -2,7 +2,7 @@
 
 ## Agreed direction and API contract
 
-NioDB will be a standalone Rust server distributed through `npx @nio-labs/niodb`. Nio, NioBridge, Nio0, NioOS, and other web/mobile clients connect through its API. TOON is the preferred storage format, with JSON interoperability at the HTTP boundary.
+NioDB will be a standalone Rust server distributed through `npx @nio-labs/niodb`. Nio and other web/mobile clients connect through its API. TOON is the preferred storage format, with JSON interoperability at the HTTP boundary.
 
 Nio is the intelligence layer, invoked through the installed Nio CLI. Server startup checks CLI availability, protocol compatibility, and provider readiness. Assistance uses the caller's workspace permissions. Database operations remain available when Nio assistance is unavailable.
 
@@ -278,20 +278,18 @@ Skills can:
 - Be shared across agents
 - Be versioned and audited
 
-## Ecosystem Integration: Nio & NioBridge
+## Ecosystem Integration: Nio & Multi-Agent Coordination
 
-NioDB serves as the underlying persistence, file storage, and GraphQL engine for:
+NioDB serves as the underlying persistence, file storage, and query engine for:
 1. **Nio** — The primary coding agent and administrative interface.
-2. **NioBridge** — The universal AI agent multiplexer and shell (`@nio-labs/niobridge`).
+2. **AI Agents** — Multi-agent frameworks, tool systems, and workflow engines.
 
-### NioBridge Integration
-External coding agents (Claude Code, AGY, OpenCode, Kilo, Codex, Aider) communicate with NioDB via:
+### Multi-Agent Integration
+External coding agents and LLMs communicate with NioDB via:
 - **`sessions.jsonl`**: Universal timeline of cross-agent turns, diffs, and prompts.
 - **`artifacts/` & `storage/`**: Code snippets, configs, diffs, and binary blobs (audio, images, PDFs).
 - **Embedded MCP Server**: Real-time context discovery and retrieval.
 - **Token Ledger**: Consolidated cost and token tracking across all providers.
-
-*(For full architecture, adapters, and CLI specifications of the agent wrapper, see [NIOBRIDGE_PLAN.md](file:///Users/mn/Documents/NIOBRIDGE_PLAN.md)).*
 
 ### NioDB Plugin for Nio CLI
 NioDB will be integrated directly into Nio as a first-class plugin (`src/plugins.rs`):
@@ -342,9 +340,9 @@ niodb --version
 - `/skills/:id/invoke` execution
 - Built-in starter skills (search, summarize, analyze, export)
 
-### Phase 4: Multi-Agent & NioBridge Integration
+### Phase 4: Multi-Agent Coordination
 - Agent self-registration & namespacing
-- NioBridge integration hooks (`sessions.jsonl` cross-agent sync)
+- Multi-agent session timeline (`sessions.jsonl` cross-agent sync)
 - NioDB Plugin for Nio CLI (`:niodb`, background daemon management)
 - Cross-agent skill sharing and audit logging
 

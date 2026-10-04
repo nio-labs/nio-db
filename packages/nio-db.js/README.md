@@ -42,7 +42,7 @@ const searchResults = await db.collection("knowledge").searchVector({
   minScore: 0.75
 });
 
-// 3. NioBridge Multi-Agent Sessions
+// 3. Multi-Agent Sessions
 const session = db.session("session_104");
 await session.appendTurn({
   agent: "claude",

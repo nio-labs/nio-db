@@ -17,7 +17,7 @@ copyFileSync(binary, join(directory, filename));
 chmodSync(join(directory, filename), 0o755);
 writeFileSync(join(directory, 'package.json'), JSON.stringify({
   name: `@nio-labs/nio-db-${platform}-${arch}`, version,
-  description: 'Platform executable for NioDB — The Agentic DB that works.', license: 'UNLICENSED',
+  description: 'Platform executable for NioDB — The Agentic DB that works.', license: 'MIT',
   os: [platform], cpu: [arch], files: [filename],
   niodbSha256: createHash('sha256').update(readFileSync(binary)).digest('hex'),
   publishConfig: { access: 'public' }

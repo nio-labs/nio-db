@@ -1,6 +1,7 @@
 /target/
 /niodb/
-/dist/
+dist/
+build/
 *.tgz
 /node_modules/
 /.nio-db.json

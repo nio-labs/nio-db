@@ -39,7 +39,7 @@ results = db.collection("knowledge").search_vector(
     min_score=0.75
 )
 
-# 3. NioBridge Multi-Agent Sessions
+# 3. Multi-Agent Sessions
 session = db.session("session_104")
 session.append_turn(
     agent="claude",
