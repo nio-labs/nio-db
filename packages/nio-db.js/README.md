@@ -1,4 +1,4 @@
-# nio-db.js
+# @nio-labs/nio-db.js
 
 Ultra-lightweight JavaScript and TypeScript client SDK for **NioDB** — the Agentic Database.
 
@@ -11,7 +11,7 @@ Ultra-lightweight JavaScript and TypeScript client SDK for **NioDB** — the Age
 ## Installation
 
 ```bash
-npm install nio-db.js
+npm install @nio-labs/nio-db.js
 ```
 
 ---
@@ -19,7 +19,7 @@ npm install nio-db.js
 ## Quickstart
 
 ```typescript
-import { createNioDB } from "nio-db.js";
+import { createNioDB } from "@nio-labs/nio-db.js";
 
 const db = createNioDB({
   url: "http://127.0.0.1:7432",

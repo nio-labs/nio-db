@@ -1,5 +1,5 @@
 {
-  "name": "nio-db.js",
+  "name": "@nio-labs/nio-db.js",
   "version": "0.1.0",
   "description": "Ultra-lightweight JavaScript and TypeScript client for NioDB — the Agentic Database.",
   "main": "index.js",
@@ -16,6 +16,9 @@
   ],
   "author": "Nio Labs",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=18"
   }
