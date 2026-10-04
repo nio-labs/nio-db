@@ -1,6 +1,6 @@
 {
   "name": "@nio-labs/nio-db",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "NioDB \u2014 The Agentic DB that works. A lightweight database with natural-language queries, powered by Nio.",
   "license": "MIT",
   "bin": {
@@ -32,12 +32,12 @@
     "@nio-labs/nio-ai": "0.3.3"
   },
   "optionalDependencies": {
-    "@nio-labs/nio-db-darwin-arm64": "0.1.0",
-    "@nio-labs/nio-db-darwin-x64": "0.1.0",
-    "@nio-labs/nio-db-linux-arm64": "0.1.0",
-    "@nio-labs/nio-db-linux-x64": "0.1.0",
-    "@nio-labs/nio-db-win32-arm64": "0.1.0",
-    "@nio-labs/nio-db-win32-x64": "0.1.0"
+    "@nio-labs/nio-db-darwin-arm64": "0.1.1",
+    "@nio-labs/nio-db-darwin-x64": "0.1.1",
+    "@nio-labs/nio-db-linux-arm64": "0.1.1",
+    "@nio-labs/nio-db-linux-x64": "0.1.1",
+    "@nio-labs/nio-db-win32-arm64": "0.1.1",
+    "@nio-labs/nio-db-win32-x64": "0.1.1"
   },
   "publishConfig": {
     "access": "public"

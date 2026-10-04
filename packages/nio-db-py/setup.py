@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="nio-db-py",
-    version="0.1.0",
+    version="0.1.1",
     description="Ultra-lightweight Python client for NioDB (The Agentic Database)",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",

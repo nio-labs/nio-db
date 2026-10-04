@@ -228,7 +228,7 @@ class NioDB:
 
         headers = {
             "Accept": "application/json",
-            "User-Agent": "nio-db-py/0.1.0"
+            "User-Agent": "nio-db-py/0.1.1"
         }
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
