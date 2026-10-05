@@ -68,7 +68,7 @@ impl io::Write for Buffer {
 }
 
 impl AlaSql {
-    fn new(node: PathBuf, helper: PathBuf, ready: bool) -> Self {
+    pub fn new(node: PathBuf, helper: PathBuf, ready: bool) -> Self {
         Self { node, helper, ready, capacity: Semaphore::new(2), idle: Arc::new(Mutex::new(Vec::new())) }
     }
     #[cfg(test)]
@@ -840,6 +840,29 @@ fn get_parsed_query(sql: &str, parameters: &[Value]) -> Result<ParsedSql, Native
         let mut parser = SqlParser::new(tokens, parameters.to_vec());
         parser.parse_select_query()
     }
+}
+
+pub fn project_column_names(sql: &str) -> Option<Vec<String>> {
+    let parsed = get_parsed_query(sql, &[]).ok()?;
+    let mut cols = Vec::new();
+    for select in &parsed.selects {
+        match select {
+            SelectExpr::Wildcard => return None,
+            SelectExpr::Field { name, alias } => {
+                cols.push(alias.clone().unwrap_or_else(|| name.clone()));
+            }
+            SelectExpr::Aggregate { func, field, alias } => {
+                if let Some(a) = alias {
+                    cols.push(a.clone());
+                } else if let Some(f) = field {
+                    cols.push(format!("{:?}({})", func, f).to_lowercase());
+                } else {
+                    cols.push("count".into());
+                }
+            }
+        }
+    }
+    Some(cols)
 }
 
 pub fn execute_native_sql_refs(

@@ -1198,6 +1198,16 @@ impl Store {
         Ok(scopes.into_iter().next())
     }
 
+    pub fn collections(&self, workspace: &str) -> Vec<String> {
+        let mut list: Vec<String> = self
+            .collection_index
+            .get(workspace)
+            .map(|m| m.keys().cloned().collect())
+            .unwrap_or_default();
+        list.sort();
+        list
+    }
+
     pub fn list(&self, workspace: &str, kind: Option<&str>) -> Vec<Artifact> {
         let now = Utc::now().to_rfc3339();
         let mut records: Vec<_> = if let Some(k) = kind {

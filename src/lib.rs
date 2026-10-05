@@ -1,6 +1,7 @@
 pub mod api;
 pub mod auth;
 pub mod nio;
+pub mod pg;
 pub mod query;
 pub mod storage;
 #[cfg(test)]

@@ -14,6 +14,7 @@ NioDB is a standalone Rust server. Nio and web/mobile applications connect over 
 - Nio-assisted queries, clarification, owned conversations and validated record references.
 - Permission-filtered Nio skill/plugin discovery; approved small skills can guide assistance.
 - Built-in Shadcn + Vue 3 Web Console Dashboard (accessible in your browser at [http://localhost:7432](http://localhost:7432) or [http://localhost:7432/console](http://localhost:7432/console)) to manage Data & Queries, Files & Buckets, Live Events & Webhooks, Auth Users, and Server Config.
+- Native PostgreSQL Wire Protocol (`pgwire`) connector for live visual inspection in DBeaver, TablePlus, DataGrip, and Metabase at `postgresql://127.0.0.1:5433` with **zero duplicate disk space**.
 - [OpenAPI 3.1 contract](openapi.yaml), readiness endpoints, offline backup and npm binary launcher.
 
 ---
@@ -215,6 +216,16 @@ NioDB includes native MCP support for AI coding assistants (Claude Desktop, Curs
   - `niodb_log_dead_end`: Log failed hypotheses to prevent agents from repeating loops.
 
 The restricted compiler accepts SELECT, DISTINCT, columns, aliases, up to two INNER/LEFT JOINs, WHERE comparisons/LIKE/IS NULL with AND/OR, GROUP BY, ORDER BY, LIMIT and OFFSET. Functions are COUNT, SUM, AVG, MIN, MAX, LOWER, UPPER, and LEN. Identifiers use ASCII letters, digits and underscores, beginning with a letter or underscore; unsafe prototype names are rejected. Use single-quoted strings or scalar `?` parameters. Raw user SQL is validated and reconstructed before AlaSQL receives it. File/network sources, arbitrary functions, JavaScript, writes and multiple statements are rejected.
+
+### PostgreSQL Wire Protocol Connector (DBeaver / TablePlus / DataGrip)
+
+NioDB includes a built-in PostgreSQL wire protocol server listening on `127.0.0.1:5433` by default (configurable with `--pg-listen IP:PORT` or `NIODB_PG_LISTEN`, or disabled with `--no-pg`).
+
+* **Zero Duplicate Disk Space**: Queries execute directly against NioDB's in-memory storage and append-only journal without maintaining or writing a separate database file.
+* **Instant GUI Inspection**:
+  1. Open **DBeaver**, **TablePlus**, or **DataGrip** and select **New Connection -> PostgreSQL**.
+  2. Set **Host**: `127.0.0.1`, **Port**: `5433`, **Database**: `niodb`, **Username**: `niodb` (no password needed).
+  3. Explore your collections as relational tables, inspect schema metadata, execute SQL queries, and export results.
 
 Natural-language queries use `POST /api/v1/assist` with a `message` and optional `conversation_id`. Plans currently support collection, literal text search, scalar equality filters, recency and up to 20 results. Nio receives a bounded schema and retrieved context, then returns a structured answer with validated record references. Aggregate and join requests use the SQL API for now. Natural-language assistance is read-only.
 

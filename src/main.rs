@@ -29,6 +29,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut listen: SocketAddr = env::var("NIODB_LISTEN")
         .unwrap_or_else(|_| "127.0.0.1:7432".into())
         .parse()?;
+    let mut pg_listen: Option<SocketAddr> = env::var("NIODB_PG_LISTEN")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .or_else(|| "127.0.0.1:5433".parse().ok());
     let mut auth_file = env::var_os("NIODB_AUTH_FILE").map(PathBuf::from);
     let mut executable =
         PathBuf::from(env::var_os("NIODB_NIO_BIN").unwrap_or_else(|| "nio".into()));
@@ -53,7 +57,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         match arg.as_str() {
             "--help" | "-h" => {
                 println!(
-                    "NioDB — The Agentic DB that works.\nA lightweight database with natural-language queries, powered by Nio.\n\nUsage: nio-db [serve|init-auth|add-secret|backup] [OPTIONS]\n\n  --dir PATH             Server data directory (default: nio-db)\n  --listen IP:PORT       Listen address (default: 127.0.0.1:7432)\n  --auth-file PATH       Hashed bearer credentials (default: DIR/auth.json)\n  --nio-bin PATH         Nio CLI executable (default: nio on PATH)\n  --nio-timeout SECONDS  Timeout per Nio invocation (default: 60)\n  --node-bin PATH        Node executable for AlaSQL (default: node on PATH)\n  --alasql-helper PATH   AlaSQL helper script\n  --name NAME            Principal name for init-auth (default: nio)\n  --skill NAME           Nio skill grant for init-auth; repeatable\n  --plugin NAME          Nio plugin discovery grant; repeatable\n  --output PATH          New backup destination; stop the server before backup\n  --include-files        Back up journal and blobs into a new directory\n  --seed-demo            Add starter examples to an existing database once\n  --no-demo              Skip starter examples on first launch\n  --version              Print version\n\ninit-auth creates client and secret bearer tokens and prints both once.\nadd-secret adds or rotates the secret token; save its output privately.\nThe server invokes Nio for read-only natural-language assistance."
+                    "NioDB — The Agentic DB that works.\nA lightweight database with natural-language queries, powered by Nio.\n\nUsage: nio-db [serve|init-auth|add-secret|backup] [OPTIONS]\n\n  --dir PATH             Server data directory (default: nio-db)\n  --listen IP:PORT       Listen address (default: 127.0.0.1:7432)\n  --pg-listen IP:PORT    PostgreSQL wire protocol listen address (default: 127.0.0.1:5433)\n  --no-pg                Disable PostgreSQL wire protocol connector\n  --auth-file PATH       Hashed bearer credentials (default: DIR/auth.json)\n  --nio-bin PATH         Nio CLI executable (default: nio on PATH)\n  --nio-timeout SECONDS  Timeout per Nio invocation (default: 60)\n  --node-bin PATH        Node executable for AlaSQL (default: node on PATH)\n  --alasql-helper PATH   AlaSQL helper script\n  --name NAME            Principal name for init-auth (default: nio)\n  --skill NAME           Nio skill grant for init-auth; repeatable\n  --plugin NAME          Nio plugin discovery grant; repeatable\n  --output PATH          New backup destination; stop the server before backup\n  --include-files        Back up journal and blobs into a new directory\n  --seed-demo            Add starter examples to an existing database once\n  --no-demo              Skip starter examples on first launch\n  --version              Print version\n\ninit-auth creates client and secret bearer tokens and prints both once.\nadd-secret adds or rotates the secret token; save its output privately.\nThe server invokes Nio for read-only natural-language assistance."
                 );
                 return Ok(());
             }
@@ -79,6 +83,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--dir" => data = PathBuf::from(args.next().ok_or("--dir requires a path")?),
             "--listen" => listen = args.next().ok_or("--listen requires an address")?.parse()?,
+            "--pg-listen" => {
+                pg_listen = Some(args.next().ok_or("--pg-listen requires an address")?.parse()?)
+            }
+            "--no-pg" => pg_listen = None,
             "--auth-file" => {
                 auth_file = Some(PathBuf::from(
                     args.next().ok_or("--auth-file requires a path")?,
@@ -214,7 +222,18 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         node_binary: node,
         worker_runner,
     };
-    startup_banner(&app, &url, &data, &auth_file);
+    let pg_url = if let Some(pg_addr) = pg_listen {
+        let app_pg = app.clone();
+        tokio::spawn(async move {
+            if let Err(e) = niodb::pg::run_pg_server(app_pg, pg_addr).await {
+                eprintln!("PostgreSQL connector error on {pg_addr}: {e}");
+            }
+        });
+        Some(format!("postgresql://{pg_addr}"))
+    } else {
+        None
+    };
+    startup_banner(&app, &url, &data, &auth_file, pg_url.as_deref());
     if let Some(event) = demo_event {
         api::dispatch_demo_event(app.clone(), event);
     }
@@ -224,7 +243,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn startup_banner(app: &App, url: &str, data: &std::path::Path, auth_file: &std::path::Path) {
+fn startup_banner(app: &App, url: &str, data: &std::path::Path, auth_file: &std::path::Path, pg_url: Option<&str>) {
     eprintln!(
         "\n  {}",
         terminal_style(&format!("NioDB v{}", env!("CARGO_PKG_VERSION")), "1")
@@ -276,6 +295,9 @@ fn startup_banner(app: &App, url: &str, data: &std::path::Path, auth_file: &std:
     eprintln!("  API docs   {}", terminal_url(&format!("{url}/doc")));
     eprintln!("  Guides     {}", terminal_url(&format!("{url}/guide")));
     eprintln!("  Server     {}", terminal_url(url));
+    if let Some(pg) = pg_url {
+        eprintln!("  Postgres   {} (DBeaver / TablePlus ready)", terminal_url(pg));
+    }
     eprintln!(
         "  OpenAPI    {}\n",
         terminal_url(&format!("{url}/openapi.yaml"))

@@ -325,7 +325,7 @@ fn authorize(principal: &Principal, workspace: &str, id: &RequestId) -> Result<(
     Ok(())
 }
 
-fn server_workspace(app: &App) -> String {
+pub fn server_workspace(app: &App) -> String {
     app.principals[0].workspaces[0].clone()
 }
 
