@@ -9,6 +9,10 @@ permissions:
   contents: write
   id-token: write
 
+env:
+  NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+  PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+
 jobs:
   build:
     name: build ${{ matrix.target }}
@@ -72,7 +76,7 @@ jobs:
           files: |
             dist/nio-db-${{ matrix.pkg_platform }}-${{ matrix.pkg_arch }}/niodb*
       - name: Publish platform package to npm
-        if: ${{ secrets.NPM_TOKEN != '' }}
+        if: ${{ env.NPM_TOKEN != '' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
@@ -92,12 +96,12 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Publish @nio-labs/nio-db.js
-        if: ${{ secrets.NPM_TOKEN != '' }}
+        if: ${{ env.NPM_TOKEN != '' }}
         run: |
           cd packages/nio-db.js
           npm publish --access public || true
       - name: Publish @nio-labs/nio-db
-        if: ${{ secrets.NPM_TOKEN != '' }}
+        if: ${{ env.NPM_TOKEN != '' }}
         run: |
           npm publish --access public || true
 
@@ -115,7 +119,7 @@ jobs:
           python -m pip install --upgrade build twine
           python -m build
       - name: Publish to PyPI
-        if: ${{ secrets.PYPI_API_TOKEN != '' }}
+        if: ${{ env.PYPI_API_TOKEN != '' }}
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
