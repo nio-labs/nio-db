@@ -14,7 +14,7 @@ NioDB is a standalone Rust server. Nio and web/mobile applications connect over 
 - Nio-assisted queries, clarification, owned conversations and validated record references.
 - Permission-filtered Nio skill/plugin discovery; approved small skills can guide assistance.
 - Built-in Shadcn + Vue 3 Web Console Dashboard (accessible in your browser at [http://localhost:7432](http://localhost:7432) or [http://localhost:7432/console](http://localhost:7432/console)) to manage Data & Queries, Files & Buckets, Live Events & Webhooks, Auth Users, and Server Config.
-- Native PostgreSQL Wire Protocol (`pgwire`) connector for live visual inspection in DBeaver, TablePlus, DataGrip, and Metabase at `postgresql://127.0.0.1:5433` with **zero duplicate disk space**.
+- Native PostgreSQL Wire Protocol (`pgwire`) connector for live visual inspection in DBeaver, TablePlus, DataGrip, and Metabase at `postgresql://127.0.0.1:5433` with password authentication and **zero duplicate disk space**.
 - [OpenAPI 3.1 contract](openapi.yaml), readiness endpoints, offline backup and npm binary launcher.
 
 ---
@@ -219,13 +219,17 @@ The restricted compiler accepts SELECT, DISTINCT, columns, aliases, up to two IN
 
 ### PostgreSQL Wire Protocol Connector (DBeaver / TablePlus / DataGrip)
 
-NioDB includes a built-in PostgreSQL wire protocol server listening on `127.0.0.1:5433` by default (configurable with `--pg-listen IP:PORT` or `NIODB_PG_LISTEN`, or disabled with `--no-pg`).
+NioDB includes a built-in PostgreSQL wire protocol (`pgwire`) server listening on `127.0.0.1:5433` by default (configurable with `--pg-listen IP:PORT` or `NIODB_PG_LISTEN`, or disabled with `--no-pg`).
 
 * **Zero Duplicate Disk Space**: Queries execute directly against NioDB's in-memory storage and append-only journal without maintaining or writing a separate database file.
+* **Secure Authentication**:
+  - Protected with password authentication. By default, the password is your cluster's secret token (saved in `DATA_DIR/secret-token`, or any valid bearer token).
+  - Can be customized with `--pg-password <PASSWORD>` or the `NIODB_PG_PASSWORD` environment variable.
 * **Instant GUI Inspection**:
   1. Open **DBeaver**, **TablePlus**, or **DataGrip** and select **New Connection -> PostgreSQL**.
-  2. Set **Host**: `127.0.0.1`, **Port**: `5433`, **Database**: `niodb`, **Username**: `niodb` (no password needed).
-  3. Explore your collections as relational tables, inspect schema metadata, execute SQL queries, and export results.
+  2. Set **Host**: `127.0.0.1`, **Port**: `5433`, **Database**: `niodb`, **Username**: `niodb`.
+  3. Set **Password**: Your cluster secret token from `nio-db/secret-token` (or your `--pg-password`).
+  4. Explore your collections as relational tables, inspect schema metadata, execute SQL queries (with full support for schema prefixes like `public.customers`, table aliases `AS c`, wildcards `c.*`, and `OFFSET` pagination), and browse data grids.
 
 Natural-language queries use `POST /api/v1/assist` with a `message` and optional `conversation_id`. Plans currently support collection, literal text search, scalar equality filters, recency and up to 20 results. Nio receives a bounded schema and retrieved context, then returns a structured answer with validated record references. Aggregate and join requests use the SQL API for now. Natural-language assistance is read-only.
 
