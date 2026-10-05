@@ -2,7 +2,7 @@
 'use strict';
 
 const { spawn, execFileSync } = require('node:child_process');
-const { existsSync, readFileSync, openSync, writeFileSync, fsyncSync, closeSync, lstatSync, renameSync, unlinkSync } = require('node:fs');
+const { existsSync, readFileSync, openSync, writeFileSync, fsyncSync, closeSync, lstatSync, renameSync, unlinkSync, mkdirSync, chmodSync } = require('node:fs');
 const { createHash, randomBytes } = require('node:crypto');
 const { join, resolve, dirname, delimiter, isAbsolute } = require('node:path');
 const { homedir } = require('node:os');
@@ -67,7 +67,21 @@ function executable() {
     const localRelease = join(__dirname, '..', 'target', 'release', platform === 'win32' ? 'niodb.exe' : 'niodb');
     if (existsSync(localRelease)) return localRelease;
     const localDebug = join(__dirname, '..', 'target', 'debug', platform === 'win32' ? 'niodb.exe' : 'niodb');
-    if (existsSync(localDebug)) return localDebug;
+    const cacheDir = join(homedir(), '.niodb', 'bin');
+    const asset = platform === 'win32' ? `niodb-${platform}-${arch}.exe` : `niodb-${platform}-${arch}`;
+    const cachedBinary = join(cacheDir, asset);
+    if (existsSync(cachedBinary)) {
+      try { chmodSync(cachedBinary, 0o755); return cachedBinary; } catch {}
+    }
+    try {
+      mkdirSync(cacheDir, { recursive: true });
+      const version = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8')).version;
+      const url = `https://github.com/nio-labs/nio-db/releases/download/v${version}/${asset}`;
+      console.error(`Downloading NioDB native binary (${asset})...`);
+      execFileSync('curl', ['-sSL', '-f', url, '-o', cachedBinary], { stdio: 'inherit' });
+      chmodSync(cachedBinary, 0o755);
+      if (existsSync(cachedBinary)) return cachedBinary;
+    } catch {}
     throw new Error(`Missing ${name}. Install with optional dependencies enabled, or build from source and set NIODB_BIN.`);
   }
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
