@@ -12,9 +12,10 @@ use pgwire::api::auth::{
 use pgwire::api::portal::Portal;
 use pgwire::api::query::{ExtendedQueryHandler, SimpleQueryHandler};
 use pgwire::api::results::{
-    DataRowEncoder, FieldFormat, FieldInfo, QueryResponse, Response, Tag,
+    DataRowEncoder, DescribePortalResponse, DescribeStatementResponse, FieldFormat, FieldInfo,
+    QueryResponse, Response, Tag,
 };
-use pgwire::api::stmt::NoopQueryParser;
+use pgwire::api::stmt::{NoopQueryParser, StoredStatement};
 use pgwire::api::store::PortalStore;
 use pgwire::api::{ClientInfo, ClientPortalStore, PgWireConnectionState, PgWireServerHandlers, Type};
 use pgwire::error::{PgWireError, PgWireResult};
@@ -698,6 +699,44 @@ impl ExtendedQueryHandler for NioPgHandler {
 
     fn query_parser(&self) -> Arc<Self::QueryParser> {
         self.query_parser.clone()
+    }
+
+    async fn do_describe_statement<C>(
+        &self,
+        _client: &mut C,
+        target: &StoredStatement<Self::Statement>,
+    ) -> PgWireResult<DescribeStatementResponse>
+    where
+        C: ClientInfo + ClientPortalStore + Sink<PgWireBackendMessage> + Unpin + Send + Sync,
+        C::PortalStore: PortalStore<Statement = Self::Statement>,
+        C::Error: Debug,
+        PgWireError: From<<C as Sink<PgWireBackendMessage>>::Error>,
+    {
+        let query = &target.statement;
+        let fields = match self.execute_query(query).await {
+            Ok(Response::Query(q)) => (*q.row_schema).clone(),
+            _ => vec![],
+        };
+        Ok(DescribeStatementResponse::new(vec![], fields))
+    }
+
+    async fn do_describe_portal<C>(
+        &self,
+        _client: &mut C,
+        target: &Portal<Self::Statement>,
+    ) -> PgWireResult<DescribePortalResponse>
+    where
+        C: ClientInfo + ClientPortalStore + Sink<PgWireBackendMessage> + Unpin + Send + Sync,
+        C::PortalStore: PortalStore<Statement = Self::Statement>,
+        C::Error: Debug,
+        PgWireError: From<<C as Sink<PgWireBackendMessage>>::Error>,
+    {
+        let query = &target.statement.statement;
+        let fields = match self.execute_query(query).await {
+            Ok(Response::Query(q)) => (*q.row_schema).clone(),
+            _ => vec![],
+        };
+        Ok(DescribePortalResponse::new(fields))
     }
 
     async fn do_query<C>(
