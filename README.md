@@ -423,7 +423,7 @@ The **before** and **current** NioDB columns ran the same benchmark script and f
 
 NioDB's current ingestion rate is about **41×** its previous rate in this run. The journal now commits each validated bulk batch as one checksummed frame and syncs once. One warm AlaSQL worker serves repeated SQL requests; a second starts on concurrent demand. Paged reads and vector search copy selected results rather than the entire workspace. NioDB's server RSS after SQL was **38.26 MiB**, plus **93.79 MiB** for its warm SQL worker; combined proportional set size after two idle seconds was **96.01 MiB**. SQLite adapter RSS after SQL was **12.30 MiB**, with **9.85 MiB** proportional set size. RSS snapshots are not peak memory, and process memory accounting varies by environment.
 
-Natural-language/LLM requests, password hashing, concurrent clients, and remote network latency are outside this benchmark. Hardware, filesystem, cache state, and background activity can change the figures. See the complete [NioDB report](benchmarks/latest.json), [previous NioDB report](benchmarks/baseline-profile.json), and [SQLite report](benchmarks/sqlite.json).
+Natural-language/LLM requests, password hashing, concurrent clients, and remote network latency are outside this benchmark. Hardware, filesystem, cache state, and background activity can change the figures. See the complete [NioDB report](benchmarks/latest.json), [previous NioDB report](benchmarks/baseline-profile.json), [SQLite report](benchmarks/sqlite.json), and the detailed [SQLite benchmark analysis and optimization strategy](docs/SQLITE_BENCHMARK_ANALYSIS_AND_ROADMAP.md).
 
 ### Reproduce
 
