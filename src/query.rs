@@ -230,6 +230,8 @@ enum SqlToken {
     Max,
     In,
     Like,
+    Offset,
+    Dot,
     Asterisk,
     Comma,
     LParen,
@@ -255,6 +257,11 @@ fn tokenize_sql(sql: &str) -> Result<Vec<SqlToken>, NativeSqlError> {
     while i < chars.len() {
         let c = chars[i];
         if c.is_whitespace() {
+            i += 1;
+            continue;
+        }
+        if c == '.' {
+            tokens.push(SqlToken::Dot);
             i += 1;
             continue;
         }
@@ -351,7 +358,11 @@ fn tokenize_sql(sql: &str) -> Result<Vec<SqlToken>, NativeSqlError> {
                     i += 1;
                 }
             }
-            tokens.push(SqlToken::StringLit(s));
+            if quote == '"' {
+                tokens.push(SqlToken::Ident(s));
+            } else {
+                tokens.push(SqlToken::StringLit(s));
+            }
             continue;
         }
         if c.is_ascii_digit() || (c == '-' && i + 1 < chars.len() && chars[i + 1].is_ascii_digit()) {
@@ -399,6 +410,7 @@ fn tokenize_sql(sql: &str) -> Result<Vec<SqlToken>, NativeSqlError> {
                 "MAX" => SqlToken::Max,
                 "IN" => SqlToken::In,
                 "LIKE" => SqlToken::Like,
+                "OFFSET" => SqlToken::Offset,
                 _ => SqlToken::Ident(word),
             };
             tokens.push(tok);
@@ -469,6 +481,7 @@ struct ParsedSql {
     group_by: Vec<String>,
     order_by: Vec<OrderByClause>,
     limit: Option<usize>,
+    offset: Option<usize>,
 }
 
 struct SqlParser {
@@ -529,7 +542,13 @@ impl SqlParser {
                             None
                         }
                         Some(SqlToken::Ident(_)) => {
-                            if let Some(SqlToken::Ident(name)) = self.advance() {
+                            if let Some(SqlToken::Ident(mut name)) = self.advance() {
+                                if self.peek() == Some(&SqlToken::Dot) {
+                                    self.advance();
+                                    if let Some(SqlToken::Ident(col)) = self.advance() {
+                                        name = col;
+                                    }
+                                }
                                 Some(name)
                             } else {
                                 None
@@ -542,7 +561,24 @@ impl SqlParser {
                     selects.push(SelectExpr::Aggregate { func, field, alias });
                 }
                 Some(SqlToken::Ident(_)) => {
-                    let name = if let Some(SqlToken::Ident(n)) = self.advance() { n } else { unreachable!() };
+                    let mut name = if let Some(SqlToken::Ident(n)) = self.advance() { n } else { unreachable!() };
+                    if self.peek() == Some(&SqlToken::Dot) {
+                        self.advance();
+                        if self.peek() == Some(&SqlToken::Asterisk) {
+                            self.advance();
+                            selects.push(SelectExpr::Wildcard);
+                            if self.peek() == Some(&SqlToken::Comma) {
+                                self.advance();
+                                continue;
+                            } else {
+                                break;
+                            }
+                        } else if let Some(SqlToken::Ident(col)) = self.advance() {
+                            name = col;
+                        } else {
+                            return Err(NativeSqlError::Unsupported);
+                        }
+                    }
                     let alias = self.parse_optional_alias();
                     selects.push(SelectExpr::Field { name, alias });
                 }
@@ -557,10 +593,18 @@ impl SqlParser {
         }
 
         self.expect(&SqlToken::From)?;
-        let from = match self.advance() {
+        let mut from = match self.advance() {
             Some(SqlToken::Ident(tbl)) => tbl,
             _ => return Err(NativeSqlError::Unsupported),
         };
+        if self.peek() == Some(&SqlToken::Dot) {
+            self.advance();
+            match self.advance() {
+                Some(SqlToken::Ident(tbl)) => from = tbl,
+                _ => return Err(NativeSqlError::Unsupported),
+            }
+        }
+        let _table_alias = self.parse_optional_alias();
 
         let mut where_expr = None;
         if self.peek() == Some(&SqlToken::Where) {
@@ -574,7 +618,15 @@ impl SqlParser {
             self.expect(&SqlToken::By)?;
             loop {
                 match self.advance() {
-                    Some(SqlToken::Ident(col)) => group_by.push(col),
+                    Some(SqlToken::Ident(mut col)) => {
+                        if self.peek() == Some(&SqlToken::Dot) {
+                            self.advance();
+                            if let Some(SqlToken::Ident(c)) = self.advance() {
+                                col = c;
+                            }
+                        }
+                        group_by.push(col);
+                    }
                     _ => return Err(NativeSqlError::Unsupported),
                 }
                 if self.peek() == Some(&SqlToken::Comma) {
@@ -590,10 +642,16 @@ impl SqlParser {
             self.advance();
             self.expect(&SqlToken::By)?;
             loop {
-                let field = match self.advance() {
+                let mut field = match self.advance() {
                     Some(SqlToken::Ident(col)) => col,
                     _ => return Err(NativeSqlError::Unsupported),
                 };
+                if self.peek() == Some(&SqlToken::Dot) {
+                    self.advance();
+                    if let Some(SqlToken::Ident(col)) = self.advance() {
+                        field = col;
+                    }
+                }
                 let descending = if self.peek() == Some(&SqlToken::Desc) {
                     self.advance();
                     true
@@ -613,20 +671,34 @@ impl SqlParser {
         }
 
         let mut limit = None;
-        if self.peek() == Some(&SqlToken::Limit) {
-            self.advance();
-            match self.advance() {
-                Some(SqlToken::NumberLit(n)) => limit = Some(n as usize),
-                Some(SqlToken::Param(idx)) => {
-                    if let Some(val) = self.parameters.get(idx.saturating_sub(1)) {
-                        limit = val.as_u64().map(|v| v as usize);
+        let mut offset = None;
+        while self.peek() == Some(&SqlToken::Limit) || self.peek() == Some(&SqlToken::Offset) {
+            if self.peek() == Some(&SqlToken::Limit) {
+                self.advance();
+                match self.advance() {
+                    Some(SqlToken::NumberLit(n)) => limit = Some(n as usize),
+                    Some(SqlToken::Param(idx)) => {
+                        if let Some(val) = self.parameters.get(idx.saturating_sub(1)) {
+                            limit = val.as_u64().map(|v| v as usize);
+                        }
                     }
+                    _ => return Err(NativeSqlError::Unsupported),
                 }
-                _ => return Err(NativeSqlError::Unsupported),
+            } else if self.peek() == Some(&SqlToken::Offset) {
+                self.advance();
+                match self.advance() {
+                    Some(SqlToken::NumberLit(n)) => offset = Some(n as usize),
+                    Some(SqlToken::Param(idx)) => {
+                        if let Some(val) = self.parameters.get(idx.saturating_sub(1)) {
+                            offset = val.as_u64().map(|v| v as usize);
+                        }
+                    }
+                    _ => return Err(NativeSqlError::Unsupported),
+                }
             }
         }
 
-        Ok(ParsedSql { selects, from, where_expr, group_by, order_by, limit })
+        Ok(ParsedSql { selects, from, where_expr, group_by, order_by, limit, offset })
     }
 
     fn parse_optional_alias(&mut self) -> Option<String> {
@@ -638,7 +710,7 @@ impl SqlParser {
             }
         } else if let Some(SqlToken::Ident(alias)) = self.peek().cloned() {
             // Check if next token is a keyword or comma/from
-            if !matches!(alias.to_uppercase().as_str(), "FROM" | "WHERE" | "GROUP" | "ORDER" | "LIMIT" | "AND" | "OR") {
+            if !matches!(alias.to_uppercase().as_str(), "FROM" | "WHERE" | "GROUP" | "ORDER" | "LIMIT" | "OFFSET" | "AND" | "OR") {
                 self.advance();
                 Some(alias)
             } else {
@@ -750,7 +822,17 @@ impl SqlParser {
                     Ok(SqlExpr::Literal(Value::Null))
                 }
             }
-            Some(SqlToken::Ident(name)) => Ok(SqlExpr::Field(name)),
+            Some(SqlToken::Ident(mut name)) => {
+                if self.peek() == Some(&SqlToken::Dot) {
+                    self.advance();
+                    if let Some(SqlToken::Ident(col)) = self.advance() {
+                        name = col;
+                    } else {
+                        return Err(NativeSqlError::Unsupported);
+                    }
+                }
+                Ok(SqlExpr::Field(name))
+            }
             _ => Err(NativeSqlError::Unsupported),
         }
     }
@@ -1027,6 +1109,13 @@ pub fn execute_native_sql_refs(
                 std::cmp::Ordering::Equal
             });
         }
+        if let Some(off) = parsed.offset {
+            if off < output_rows.len() {
+                output_rows = output_rows.split_off(off);
+            } else {
+                output_rows.clear();
+            }
+        }
         if let Some(lim) = parsed.limit {
             output_rows.truncate(lim);
         }
@@ -1052,12 +1141,13 @@ pub fn execute_native_sql_refs(
                         let c = if descending { b.0.cmp(&a.0) } else { a.0.cmp(&b.0) };
                         c.then_with(|| a.1.cmp(&b.1))
                     };
-                    if let Some(limit) = parsed.limit {
-                        if limit < int_ranked.len() {
-                            if limit > 0 {
-                                int_ranked.select_nth_unstable_by(limit, cmp);
+                    let needed = parsed.limit.map(|lim| parsed.offset.unwrap_or(0).saturating_add(lim));
+                    if let Some(needed) = needed {
+                        if needed < int_ranked.len() {
+                            if needed > 0 {
+                                int_ranked.select_nth_unstable_by(needed, cmp);
                             }
-                            int_ranked.truncate(limit);
+                            int_ranked.truncate(needed);
                         }
                     }
                     int_ranked.sort_unstable_by(cmp);
@@ -1099,22 +1189,33 @@ pub fn execute_native_sql_refs(
                 };
                 let compare = |a: &(usize, &Arc<Artifact>), b: &(usize, &Arc<Artifact>)|
                     compare_values(a, b).then_with(|| a.0.cmp(&b.0));
+                let needed = parsed.limit.map(|lim| parsed.offset.unwrap_or(0).saturating_add(lim));
                 if comparable {
-                    if let Some(limit) = parsed.limit {
-                        if limit < ranked.len() {
-                            if limit > 0 { ranked.select_nth_unstable_by(limit, compare); }
-                            ranked.truncate(limit);
+                    if let Some(needed) = needed {
+                        if needed < ranked.len() {
+                            if needed > 0 { ranked.select_nth_unstable_by(needed, compare); }
+                            ranked.truncate(needed);
                         }
                     }
                     ranked.sort_unstable_by(compare);
                 } else {
                     ranked.sort_by(compare_values);
-                    if let Some(limit) = parsed.limit { ranked.truncate(limit); }
+                    if let Some(needed) = needed { ranked.truncate(needed); }
                 }
                 sorted_refs = ranked.into_iter().map(|(_, a)| a).collect();
             }
-        } else if let Some(limit) = parsed.limit {
-            sorted_refs.truncate(limit);
+        } else if let Some(needed) = parsed.limit.map(|lim| parsed.offset.unwrap_or(0).saturating_add(lim)) {
+            sorted_refs.truncate(needed);
+        }
+        if let Some(off) = parsed.offset {
+            if off < sorted_refs.len() {
+                sorted_refs = sorted_refs.split_off(off);
+            } else {
+                sorted_refs.clear();
+            }
+        }
+        if let Some(lim) = parsed.limit {
+            sorted_refs.truncate(lim);
         }
         let is_wildcard = parsed.selects.iter().any(|s| matches!(s, SelectExpr::Wildcard));
         let field_selectors: Vec<(&str, &str)> = if !is_wildcard {
@@ -1158,28 +1259,29 @@ pub fn execute_native_sql_refs(
 
 #[inline(always)]
 fn get_field_ref<'a>(artifact: &'a Artifact, field: &str) -> Option<&'a Value> {
-    match field {
-        _ => artifact.data.get(field),
-    }
+    let clean = field.split('.').last().unwrap_or(field);
+    artifact.data.get(clean)
 }
 
 // Document fields can be compared and grouped without cloning their JSON.
 fn record_field_value<'a>(artifact: &'a Artifact, field: &str) -> std::borrow::Cow<'a, Value> {
-    if matches!(field, "id" | "collection" | "type" | "revision" | "created_at" | "updated_at") {
-        std::borrow::Cow::Owned(get_record_field_val(artifact, field))
+    let clean = field.split('.').last().unwrap_or(field);
+    if matches!(clean, "id" | "collection" | "type" | "revision" | "created_at" | "updated_at") {
+        std::borrow::Cow::Owned(get_record_field_val(artifact, clean))
     } else {
-        std::borrow::Cow::Borrowed(artifact.data.get(field).unwrap_or(&Value::Null))
+        std::borrow::Cow::Borrowed(artifact.data.get(clean).unwrap_or(&Value::Null))
     }
 }
 
 fn get_record_field_val(artifact: &Artifact, field: &str) -> Value {
-    match field {
+    let clean = field.split('.').last().unwrap_or(field);
+    match clean {
         "id" => Value::String(artifact.id.clone()),
         "collection" | "type" => Value::String(artifact.kind.clone()),
         "revision" => json!(artifact.revision),
         "created_at" => Value::String(artifact.created_at.clone()),
         "updated_at" => Value::String(artifact.updated_at.clone()),
-        _ => artifact.data.get(field).cloned().unwrap_or(Value::Null),
+        _ => artifact.data.get(clean).cloned().unwrap_or(Value::Null),
     }
 }
 
@@ -1511,5 +1613,46 @@ while True:
         let _ = task.await; let _ = second.await;
         assert_eq!(engine.capacity.available_permits(), 2);
         assert!(engine.execute("ok".into(), vec![], &[], false).await.is_ok());
+    }
+
+    #[test]
+    fn test_schema_qualified_and_aliased_queries() {
+        let records = vec![
+            Arc::new(Artifact {
+                id: "c1".into(),
+                workspace_id: "default".into(),
+                kind: "customers".into(),
+                data: json!({"name": "Ada", "city": "London"}).as_object().unwrap().clone(),
+                revision: 1,
+                created_at: "2026-01-01".into(),
+                updated_at: "2026-01-01".into(),
+            }),
+            Arc::new(Artifact {
+                id: "c2".into(),
+                workspace_id: "default".into(),
+                kind: "customers".into(),
+                data: json!({"name": "Bob", "city": "Paris"}).as_object().unwrap().clone(),
+                revision: 1,
+                created_at: "2026-01-01".into(),
+                updated_at: "2026-01-01".into(),
+            }),
+        ];
+
+        // 1. DBeaver style: SELECT c.* FROM public.customers AS c
+        assert_eq!(extract_table_from_sql("SELECT c.* FROM public.customers AS c"), Some("customers".into()));
+        let res = execute_native_sql("SELECT c.* FROM public.customers AS c LIMIT 10 OFFSET 0", &[], &records, false).unwrap();
+        assert_eq!(res["items"].as_array().unwrap().len(), 2);
+
+        // 2. Schema qualified with OFFSET
+        let res2 = execute_native_sql("SELECT c.name FROM public.customers AS c OFFSET 1 LIMIT 1", &[], &records, false).unwrap();
+        assert_eq!(res2["items"], json!([{"name": "Bob"}]));
+
+        // 3. Double-quoted identifiers
+        let res3 = execute_native_sql(r#"SELECT "c".* FROM "public"."customers" AS "c""#, &[], &records, false).unwrap();
+        assert_eq!(res3["items"].as_array().unwrap().len(), 2);
+
+        // 4. Aliased where and order
+        let res4 = execute_native_sql("SELECT c.name, c.city FROM public.customers AS c WHERE c.name = 'Ada' ORDER BY c.city DESC", &[], &records, false).unwrap();
+        assert_eq!(res4["items"], json!([{"name": "Ada", "city": "London"}]));
     }
 }

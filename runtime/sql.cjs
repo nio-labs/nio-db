@@ -104,7 +104,8 @@ function compileSql(sql, parameters, tables) {
   function conjunction() { let result = predicate(); while (take('and')) result += ' AND ' + predicate(); return result; }
   function disjunction() { let result = conjunction(); while (take('or')) result += ' OR ' + conjunction(); return result; }
   function table() {
-    const key = name();
+    let key = name();
+    if (take('.')) key = name();
     const source = key === 'records' ? 'artifacts' : key;
     if (!Object.hasOwn(tables, source) || !Array.isArray(tables[source])) throw new Error('query_rejected');
     bindings.push(tables[source]);
