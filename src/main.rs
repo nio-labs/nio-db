@@ -232,7 +232,17 @@ fn startup_banner(app: &App, url: &str, data: &std::path::Path, auth_file: &std:
         )
     );
     let nio_status = match app.nio.readiness.status.as_str() {
-        "ready" => "Configured",
+        "ready" => {
+            if let Some(v) = &app.nio.readiness.version {
+                if v.starts_with("fallback:") {
+                    "LLM Fallback"
+                } else {
+                    "Configured"
+                }
+            } else {
+                "Configured"
+            }
+        }
         "missing" => "Not installed",
         "unconfigured" => "Needs a model",
         "incompatible" => "Needs an update",

@@ -64,8 +64,10 @@ function executable() {
   try { manifestPath = require.resolve(`${name}/package.json`); }
   catch {
     // Development checkout only. Cargo build artifacts are excluded from npm packages.
-    const local = join(__dirname, '..', 'target', 'release', platform === 'win32' ? 'niodb.exe' : 'niodb');
-    if (existsSync(local)) return local;
+    const localRelease = join(__dirname, '..', 'target', 'release', platform === 'win32' ? 'niodb.exe' : 'niodb');
+    if (existsSync(localRelease)) return localRelease;
+    const localDebug = join(__dirname, '..', 'target', 'debug', platform === 'win32' ? 'niodb.exe' : 'niodb');
+    if (existsSync(localDebug)) return localDebug;
     throw new Error(`Missing ${name}. Install with optional dependencies enabled, or build from source and set NIODB_BIN.`);
   }
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
@@ -91,7 +93,7 @@ function startupCommand(args) {
       return false;
     } else if (arg === '--include-files') {
       continue;
-    } else if (['serve', 'init-auth', 'add-secret', 'backup'].includes(arg)) {
+    } else if (['serve', 'init-auth', 'add-secret', 'backup', 'mcp'].includes(arg)) {
       if (arg !== 'serve') command = arg;
     } else { return false; }
   }
@@ -210,10 +212,70 @@ function bootstrapAuth(binary, args) {
   return true;
 }
 
+async function runMcpStdio(args) {
+  loadSettings(args);
+  const directory = resolve(option(args, '--dir') || process.env.NIODB_DIR || './niodb');
+  const tokenPath = join(directory, 'client-token');
+  const secretPath = join(directory, 'secret-token');
+  let token = process.env.NIODB_TOKEN;
+  if (!token) {
+    if (existsSync(tokenPath)) {
+      token = readFileSync(tokenPath, 'utf8').trim();
+    } else if (existsSync(secretPath)) {
+      token = readFileSync(secretPath, 'utf8').trim();
+    }
+  }
+  const listen = option(args, '--listen') || process.env.NIODB_LISTEN || '127.0.0.1:7432';
+  const url = `http://${listen}/mcp`;
+
+  const readline = require('node:readline');
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    terminal: false,
+  });
+
+  for await (const line of rl) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let requestJson;
+    try {
+      requestJson = JSON.parse(trimmed);
+    } catch {
+      process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }) + '\n');
+      continue;
+    }
+
+    try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(requestJson),
+      });
+
+      const data = await res.json();
+      process.stdout.write(JSON.stringify(data) + '\n');
+    } catch (err) {
+      process.stdout.write(JSON.stringify({
+        jsonrpc: '2.0',
+        id: requestJson.id ?? null,
+        error: { code: -32000, message: `Failed to connect to NioDB server at ${url}: ${err.message}` }
+      }) + '\n');
+    }
+  }
+}
+
 async function main() {
   const inputArgs = process.argv.slice(2);
   const acceptDefaults = inputArgs.includes('--yes');
   const args = inputArgs.filter(arg => arg !== '--yes');
+  if (args.includes('mcp')) {
+    await runMcpStdio(args);
+    return;
+  }
   const binary = executable();
   // Informational and offline commands must not install Nio or create credentials.
   const startup = startupCommand(args);

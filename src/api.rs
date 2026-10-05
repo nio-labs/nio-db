@@ -94,6 +94,7 @@ pub fn router(app: App) -> Router {
         )
         .route("/api/v1/status", get(status))
         .route("/api/v1/records", get(list_records).post(create_record))
+        .route("/api/v1/records/watch", get(watch_records))
         .route("/api/v1/records/bulk", post(bulk_records_handler))
         .route("/api/v1/records/batch", post(bulk_records_handler))
         .route(
@@ -672,6 +673,7 @@ async fn create(
     State(app): State<App>,
     Extension(principal): Extension<Principal>,
     Extension(id): Extension<RequestId>,
+    session: Option<Extension<accounts::SessionIdentity>>,
     query: Result<Query<WorkspaceQuery>, QueryRejection>,
     headers: axum::http::HeaderMap,
     body: Result<Json<Create>, JsonRejection>,
@@ -688,7 +690,7 @@ async fn create(
         .0;
     query.workspace_id = server_workspace(&app);
     authorize(&principal, &query.workspace_id, &id)?;
-    let body = body.map_err(|rejection| body_error(&id, rejection))?.0;
+    let mut body = body.map_err(|rejection| body_error(&id, rejection))?.0;
     if body.kind.trim().is_empty() || body.kind.len() > 128 {
         return Err(error(
             &id,
@@ -704,6 +706,11 @@ async fn create(
             "reserved_type",
             "File metadata is managed by the storage API; upload files through that API",
         ));
+    }
+    if let Some(Extension(ref sess)) = session {
+        if !body.data.contains_key("owner_id") && !body.data.contains_key("user_id") {
+            body.data.insert("owner_id".into(), json!(sess.user.id));
+        }
     }
     let key = headers
         .get("idempotency-key")
@@ -727,6 +734,12 @@ async fn create(
         store.create(&query.workspace_id, body.kind, body.data, key)
     })
     .await?;
+    let _ = app.events.send(json!({
+        "name": "record:create",
+        "event": "record:create",
+        "collection": artifact.kind,
+        "record": record_value(public_value(&artifact))
+    }));
     Ok((StatusCode::CREATED, Json(public_value(&artifact))))
 }
 
@@ -734,11 +747,12 @@ async fn create_record(
     app: State<App>,
     principal: Extension<Principal>,
     id: Extension<RequestId>,
+    session: Option<Extension<accounts::SessionIdentity>>,
     query: Result<Query<WorkspaceQuery>, QueryRejection>,
     headers: axum::http::HeaderMap,
     body: Result<Json<Create>, JsonRejection>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
-    let (status, Json(record)) = create(app, principal, id, query, headers, body).await?;
+    let (status, Json(record)) = create(app, principal, id, session, query, headers, body).await?;
     Ok((status, Json(record_value(record))))
 }
 
@@ -800,7 +814,15 @@ async fn update_record_handler(
     .await?;
 
     match updated {
-        Some(artifact) => Ok(Json(record_value(public_value(&artifact)))),
+        Some(artifact) => {
+            let _ = app.events.send(json!({
+                "name": "record:update",
+                "event": "record:update",
+                "collection": artifact.kind,
+                "record": record_value(public_value(&artifact))
+            }));
+            Ok(Json(record_value(public_value(&artifact))))
+        }
         None => Err(error(
             &id,
             StatusCode::NOT_FOUND,
@@ -839,6 +861,11 @@ async fn delete_record_handler(
     .await?;
 
     if deleted {
+        let _ = app.events.send(json!({
+            "name": "record:delete",
+            "event": "record:delete",
+            "id": record_id
+        }));
         Ok(Json(json!({
             "success": true,
             "deleted": true,
@@ -852,6 +879,68 @@ async fn delete_record_handler(
             "Record not found or not visible",
         ))
     }
+}
+
+#[derive(Deserialize)]
+struct RecordWatchQuery {
+    collection: Option<String>,
+}
+
+async fn watch_records(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    Extension(id): Extension<RequestId>,
+    session: Option<Extension<accounts::SessionIdentity>>,
+    query: Result<Query<RecordWatchQuery>, QueryRejection>,
+) -> Result<
+    axum::response::sse::Sse<impl futures_util::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>>,
+    ApiError,
+> {
+    let ws = server_workspace(&app);
+    authorize(&principal, &ws, &id)?;
+    let target_col = query.ok().and_then(|q| q.0.collection);
+    let user_id = session.map(|s| s.user.id.clone());
+    let receiver = app.events.subscribe();
+
+    let stream = futures_util::stream::unfold((receiver, target_col, user_id), |(mut receiver, target_col, user_id)| async move {
+        loop {
+            match receiver.recv().await {
+                Ok(value) => {
+                    let ev_name = value.get("event").and_then(Value::as_str).unwrap_or_default();
+                    if !ev_name.starts_with("record:") {
+                        continue;
+                    }
+                    if let Some(ref col) = target_col {
+                        if value.get("collection").and_then(Value::as_str) != Some(col) {
+                            continue;
+                        }
+                    }
+                    if let Some(ref uid) = user_id {
+                        if let Some(rec) = value.get("record") {
+                            let is_pub = rec.get("data").and_then(|d| d.get("is_public")).and_then(Value::as_bool).unwrap_or(false);
+                            let owner = rec.get("data").and_then(|d| d.get("owner_id").or_else(|| d.get("user_id"))).and_then(Value::as_str);
+                            if !is_pub && owner.is_some_and(|o| o != uid) {
+                                continue;
+                            }
+                        }
+                    }
+                    return Some((
+                        Ok(axum::response::sse::Event::default().event(ev_name).data(value.to_string())),
+                        (receiver, target_col, user_id),
+                    ));
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
+                    return Some((
+                        Ok(axum::response::sse::Event::default().event("gap").data(json!({"missed": count}).to_string())),
+                        (receiver, target_col, user_id),
+                    ));
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+            }
+        }
+    });
+
+    Ok(axum::response::sse::Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::new().interval(std::time::Duration::from_secs(15))))
 }
 
 async fn bulk_records_handler(
@@ -1795,14 +1884,180 @@ async fn mcp_handler(
     State(app): State<App>,
     Extension(principal): Extension<Principal>,
     Extension(id): Extension<RequestId>,
+    session: Option<Extension<accounts::SessionIdentity>>,
     body: Result<Json<McpRequest>, JsonRejection>,
 ) -> Result<Json<Value>, ApiError> {
     let ws = server_workspace(&app);
     authorize(&principal, &ws, &id)?;
     let body = body.map_err(|rejection| body_error(&id, rejection))?.0;
     let req_id = body.id.unwrap_or(json!(1));
+    let user_id = session.map(|s| s.user.id.clone());
 
     match body.method.as_str() {
+        "initialize" => {
+            Ok(Json(json!({
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {},
+                        "resources": {}
+                    },
+                    "serverInfo": {
+                        "name": "niodb",
+                        "version": "1.0.0"
+                    }
+                }
+            })))
+        }
+        "notifications/initialized" => {
+            Ok(Json(json!({
+                "jsonrpc": "2.0"
+            })))
+        }
+        "ping" => {
+            Ok(Json(json!({
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {}
+            })))
+        }
+        "resources/list" => {
+            Ok(Json(json!({
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "resources": [
+                        {
+                            "uri": "niodb://schema",
+                            "name": "Database Schema",
+                            "description": "Active collections and sample field structures in NioDB",
+                            "mimeType": "application/json"
+                        },
+                        {
+                            "uri": "niodb://active-tasks",
+                            "name": "Active Tasks",
+                            "description": "List of pending or running background tasks",
+                            "mimeType": "application/json"
+                        }
+                    ]
+                }
+            })))
+        }
+        "resources/read" => {
+            let uri = body.params.get("uri").and_then(Value::as_str).unwrap_or_default();
+            let ws_clone = ws.clone();
+            let uid = user_id.clone();
+            if uri == "niodb://schema" {
+                let records = storage(&app, &id, move |store| {
+                    Ok(store.list_visible(&ws_clone, None, uid.as_deref()))
+                }).await?;
+                let mut schema_map = BTreeMap::<String, BTreeSet<String>>::new();
+                for r in records {
+                    let fields = schema_map.entry(r.kind).or_default();
+                    for k in r.data.keys() {
+                        fields.insert(k.clone());
+                    }
+                }
+                let schema_json: BTreeMap<String, Vec<String>> = schema_map.into_iter().map(|(k, v)| (k, v.into_iter().collect())).collect();
+                Ok(Json(json!({
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {
+                        "contents": [
+                            {
+                                "uri": "niodb://schema",
+                                "mimeType": "application/json",
+                                "text": serde_json::to_string_pretty(&schema_json).unwrap_or_default()
+                            }
+                        ]
+                    }
+                })))
+            } else if uri == "niodb://active-tasks" {
+                let tasks = storage(&app, &id, move |store| {
+                    let all = store.list_visible(&ws_clone, Some("tasks"), uid.as_deref());
+                    Ok(all.into_iter().filter(|t| {
+                        let st = t.data.get("status").and_then(Value::as_str).unwrap_or("pending");
+                        st == "pending" || st == "running"
+                    }).map(|t| record_value(public_value(&t))).collect::<Vec<_>>())
+                }).await?;
+                Ok(Json(json!({
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {
+                        "contents": [
+                            {
+                                "uri": "niodb://active-tasks",
+                                "mimeType": "application/json",
+                                "text": serde_json::to_string_pretty(&tasks).unwrap_or_default()
+                            }
+                        ]
+                    }
+                })))
+            } else if let Some(sid) = uri.strip_prefix("niodb://session/") {
+                let sid_owned = sid.to_string();
+                let session_opt = storage(&app, &id, move |store| {
+                    Ok(store.get_visible(&ws_clone, &sid_owned, uid.as_deref()))
+                }).await?;
+                let Some(session_art) = session_opt else {
+                    return Ok(Json(json!({
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "error": { "code": -32000, "message": format!("Session not found: {sid}") }
+                    })));
+                };
+                let ws_clone2 = ws.clone();
+                let sid_owned2 = sid.to_string();
+                let turns = storage(&app, &id, move |store| {
+                    let all_turns = store.list_visible(&ws_clone2, Some("session_turns"), None);
+                    Ok(all_turns.into_iter().filter(|t| t.data.get("session_id").and_then(Value::as_str) == Some(&sid_owned2)).collect::<Vec<_>>())
+                }).await?;
+                let mut files_set = BTreeSet::new();
+                let mut turn_summaries = Vec::new();
+                for t in &turns {
+                    if let Some(files) = t.data.get("files_touched").and_then(Value::as_array) {
+                        for f in files {
+                            if let Some(s) = f.as_str() { files_set.insert(s.to_string()); }
+                        }
+                    }
+                    let agent = t.data.get("agent").and_then(Value::as_str).unwrap_or("agent");
+                    let summary = t.data.get("summary").and_then(Value::as_str).unwrap_or("");
+                    if !summary.is_empty() {
+                        turn_summaries.push(format!("- [{agent}] {summary}"));
+                    }
+                }
+                let goal = session_art.data.get("goal").and_then(Value::as_str).unwrap_or("No goal specified");
+                let title = session_art.data.get("title").and_then(Value::as_str).unwrap_or("Untitled Session");
+                let manifest_text = format!(
+                    "# Session Manifest: {}\nGoal: {}\nTotal Turns: {}\nFiles Touched: {}\n\nRecent History:\n{}",
+                    title,
+                    goal,
+                    turns.len(),
+                    files_set.into_iter().collect::<Vec<_>>().join(", "),
+                    if turn_summaries.is_empty() { "No turns recorded yet".into() } else { turn_summaries.join("\n") }
+                );
+                Ok(Json(json!({
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {
+                        "contents": [
+                            {
+                                "uri": uri,
+                                "mimeType": "text/markdown",
+                                "text": manifest_text
+                            }
+                        ]
+                    }
+                })))
+            } else {
+                Ok(Json(json!({
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": { "code": -32602, "message": format!("Resource not found: {uri}") }
+                })))
+            }
+        }
         "tools/list" => {
             let tools = agent_tools().await;
             Ok(Json(json!({
@@ -1815,9 +2070,92 @@ async fn mcp_handler(
             let name = body.params.get("name").and_then(Value::as_str).unwrap_or_default();
             let args = body.params.get("arguments").cloned().unwrap_or(json!({}));
             match name {
+                "niodb_create_record" => {
+                    let collection = args.get("collection").and_then(Value::as_str).unwrap_or("agent_memory").to_string();
+                    let mut data = args.get("data").and_then(Value::as_object).cloned().unwrap_or_default();
+                    if let Some(ttl) = args.get("ttl").and_then(Value::as_i64) {
+                        let expires_at = (chrono::Utc::now() + chrono::Duration::seconds(ttl)).to_rfc3339();
+                        data.insert("expires_at".into(), json!(expires_at));
+                    }
+                    if let Some(ref uid) = user_id {
+                        if !data.contains_key("owner_id") && !data.contains_key("user_id") {
+                            data.insert("owner_id".into(), json!(uid));
+                        }
+                    }
+                    let ws_clone = ws.clone();
+                    let art_res = storage(&app, &id, move |store| {
+                        store.create(&ws_clone, collection, data, None)
+                    }).await;
+                    match art_res {
+                        Ok(art) => {
+                            let val = record_value(public_value(&art));
+                            Ok(Json(json!({
+                                "jsonrpc": "2.0",
+                                "id": req_id,
+                                "result": {
+                                    "content": [{ "type": "text", "text": serde_json::to_string(&val).unwrap_or_default() }]
+                                }
+                            })))
+                        }
+                        Err(e) => Ok(Json(json!({
+                            "jsonrpc": "2.0",
+                            "id": req_id,
+                            "error": { "code": -32000, "message": e.message }
+                        }))),
+                    }
+                }
+                "niodb_search_records" => {
+                    let collection = args.get("collection").and_then(Value::as_str).map(str::to_owned);
+                    let vector = args.get("vector")
+                        .and_then(Value::as_array)
+                        .map(|arr| arr.iter().filter_map(|x| x.as_f64().map(|f| f as f32)).collect::<Vec<f32>>())
+                        .unwrap_or_default();
+                    if vector.is_empty() {
+                        return Ok(Json(json!({
+                            "jsonrpc": "2.0",
+                            "id": req_id,
+                            "error": { "code": -32602, "message": "Missing or empty vector array" }
+                        })));
+                    }
+                    let top_k = args.get("top_k").and_then(Value::as_u64).unwrap_or(5) as usize;
+                    let min_score = args.get("min_score").and_then(Value::as_f64).map(|f| f as f32);
+                    let ws_clone = ws.clone();
+                    let uid = user_id.clone();
+                    let search_res = storage(&app, &id, move |store| {
+                        Ok(store.search_vectors(&ws_clone, collection.as_deref(), &vector, top_k, min_score, uid.as_deref()))
+                    }).await;
+                    match search_res {
+                        Ok(results) => {
+                            let items: Vec<Value> = results.into_iter().map(|(art, score)| {
+                                let mut val = record_value(public_value(&art));
+                                if let Some(obj) = val.as_object_mut() {
+                                    obj.insert("similarity_score".into(), json!(score));
+                                }
+                                val
+                            }).collect();
+                            Ok(Json(json!({
+                                "jsonrpc": "2.0",
+                                "id": req_id,
+                                "result": {
+                                    "content": [{ "type": "text", "text": serde_json::to_string(&items).unwrap_or_default() }]
+                                }
+                            })))
+                        }
+                        Err(e) => Ok(Json(json!({
+                            "jsonrpc": "2.0",
+                            "id": req_id,
+                            "error": { "code": -32000, "message": e.message }
+                        }))),
+                    }
+                }
                 "niodb_query_sql" => {
                     let sql = args.get("sql").and_then(Value::as_str).unwrap_or_default();
-                    let sql_res = app.query.execute(sql.to_owned(), Vec::new(), &[], false).await;
+                    let ws_clone = ws.clone();
+                    let uid = user_id.clone();
+                    let records = storage(&app, &id, move |store| {
+                        Ok(store.list_visible(&ws_clone, None, uid.as_deref()))
+                    }).await?;
+                    let sql_res = app.query.execute(sql.to_owned(), Vec::new(), &records, false).await;
                     match sql_res {
                         Ok(data) => Ok(Json(json!({
                             "jsonrpc": "2.0",
@@ -1831,10 +2169,96 @@ async fn mcp_handler(
                         }))),
                     }
                 }
+                "niodb_get_session_manifest" => {
+                    let session_id = args.get("session_id").and_then(Value::as_str).unwrap_or_default();
+                    let ws_clone = ws.clone();
+                    let sid = session_id.to_string();
+                    let uid = user_id.clone();
+                    let session_opt = storage(&app, &id, move |store| {
+                        Ok(store.get_visible(&ws_clone, &sid, uid.as_deref()))
+                    }).await?;
+                    let Some(session_art) = session_opt else {
+                        return Ok(Json(json!({
+                            "jsonrpc": "2.0",
+                            "id": req_id,
+                            "error": { "code": -32000, "message": format!("Session not found: {session_id}") }
+                        })));
+                    };
+                    let ws_clone2 = ws.clone();
+                    let sid2 = session_id.to_string();
+                    let turns = storage(&app, &id, move |store| {
+                        let all_turns = store.list_visible(&ws_clone2, Some("session_turns"), None);
+                        Ok(all_turns.into_iter().filter(|t| t.data.get("session_id").and_then(Value::as_str) == Some(&sid2)).collect::<Vec<_>>())
+                    }).await?;
+                    let goal = session_art.data.get("goal").and_then(Value::as_str).unwrap_or("No goal specified");
+                    let title = session_art.data.get("title").and_then(Value::as_str).unwrap_or("Untitled Session");
+                    let mut files_set = BTreeSet::new();
+                    let mut turn_summaries = Vec::new();
+                    for t in &turns {
+                        if let Some(files) = t.data.get("files_touched").and_then(Value::as_array) {
+                            for f in files {
+                                if let Some(s) = f.as_str() { files_set.insert(s.to_string()); }
+                            }
+                        }
+                        let agent = t.data.get("agent").and_then(Value::as_str).unwrap_or("agent");
+                        let summary = t.data.get("summary").and_then(Value::as_str).unwrap_or("");
+                        if !summary.is_empty() {
+                            turn_summaries.push(format!("- [{agent}] {summary}"));
+                        }
+                    }
+                    let manifest_text = format!(
+                        "# Session Manifest: {}\nGoal: {}\nTotal Turns: {}\nFiles Touched: {}\n\nRecent History:\n{}",
+                        title,
+                        goal,
+                        turns.len(),
+                        files_set.into_iter().collect::<Vec<_>>().join(", "),
+                        if turn_summaries.is_empty() { "No turns recorded yet".into() } else { turn_summaries.join("\n") }
+                    );
+                    let res = json!({
+                        "session_id": session_id,
+                        "title": title,
+                        "goal": goal,
+                        "turn_count": turns.len(),
+                        "manifest_text": manifest_text
+                    });
+                    Ok(Json(json!({
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "result": { "content": [{ "type": "text", "text": serde_json::to_string(&res).unwrap_or_default() }] }
+                    })))
+                }
+                "niodb_log_dead_end" => {
+                    let session_id = args.get("session_id").and_then(Value::as_str).unwrap_or_default();
+                    let hypothesis = args.get("hypothesis").and_then(Value::as_str).unwrap_or_default();
+                    let reason = args.get("reason").and_then(Value::as_str).unwrap_or_default();
+                    let agent = args.get("agent").and_then(Value::as_str).unwrap_or("unknown");
+                    let mut data = Map::new();
+                    data.insert("session_id".into(), Value::String(session_id.into()));
+                    data.insert("hypothesis".into(), Value::String(hypothesis.into()));
+                    data.insert("reason".into(), Value::String(reason.into()));
+                    data.insert("agent".into(), Value::String(agent.into()));
+                    data.insert("created_at".into(), Value::String(chrono::Utc::now().to_rfc3339()));
+                    let ws_clone = ws.clone();
+                    let art_res = storage(&app, &id, move |store| {
+                        store.create(&ws_clone, "session_dead_ends".into(), data, None)
+                    }).await;
+                    match art_res {
+                        Ok(art) => Ok(Json(json!({
+                            "jsonrpc": "2.0",
+                            "id": req_id,
+                            "result": { "content": [{ "type": "text", "text": format!("Dead-end logged: {}", art.id) }] }
+                        }))),
+                        Err(e) => Ok(Json(json!({
+                            "jsonrpc": "2.0",
+                            "id": req_id,
+                            "error": { "code": -32000, "message": e.message }
+                        }))),
+                    }
+                }
                 _ => Ok(Json(json!({
                     "jsonrpc": "2.0",
                     "id": req_id,
-                    "result": { "content": [{ "type": "text", "text": format!("Tool executed: {}", name) }] }
+                    "error": { "code": -32601, "message": format!("Tool not found: {}", name) }
                 }))),
             }
         }
@@ -2996,21 +3420,184 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert!(tools_res["tools"].as_array().unwrap().len() >= 4);
 
+        // Test MCP initialize
+        let init_req = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": { "name": "cursor", "version": "1.0.0" }
+            }
+        });
+        let (status, init_res) = request(&router, "POST", "/mcp", Some("alice"), init_req, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(init_res["result"]["serverInfo"]["name"], "niodb");
+
+        // Test MCP ping
+        let ping_req = json!({ "jsonrpc": "2.0", "id": 2, "method": "ping" });
+        let (status, ping_res) = request(&router, "POST", "/mcp", Some("alice"), ping_req, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(ping_res["id"], 2);
+
         // Test MCP tools/list
         let mcp_req = json!({
             "jsonrpc": "2.0",
-            "id": 1,
+            "id": 3,
             "method": "tools/list"
         });
         let (status, mcp_res) = request(&router, "POST", "/mcp", Some("alice"), mcp_req, None).await;
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(mcp_res["id"], 1);
+        assert_eq!(mcp_res["id"], 3);
         assert!(mcp_res["result"]["tools"].as_array().is_some());
+
+        // Test MCP tools/call -> niodb_create_record
+        let create_call = json!({
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": {
+                "name": "niodb_create_record",
+                "arguments": {
+                    "collection": "knowledge",
+                    "data": {
+                        "topic": "Architecture",
+                        "vector": [0.8, 0.6, 0.0]
+                    }
+                }
+            }
+        });
+        let (status, create_res) = request(&router, "POST", "/mcp", Some("alice"), create_call, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(create_res["result"]["content"][0]["text"].as_str().unwrap().contains("Architecture"));
+
+        // Test MCP tools/call -> niodb_search_records
+        let search_call = json!({
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "tools/call",
+            "params": {
+                "name": "niodb_search_records",
+                "arguments": {
+                    "collection": "knowledge",
+                    "vector": [0.8, 0.6, 0.0],
+                    "top_k": 3
+                }
+            }
+        });
+        let (status, search_res) = request(&router, "POST", "/mcp", Some("alice"), search_call, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(search_res["result"]["content"][0]["text"].as_str().unwrap().contains("Architecture"));
+
+        // Test MCP resources/list
+        let res_list_req = json!({
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "resources/list"
+        });
+        let (status, res_list) = request(&router, "POST", "/mcp", Some("alice"), res_list_req, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(res_list["result"]["resources"].as_array().unwrap().len(), 2);
+
+        // Test MCP resources/read -> niodb://schema
+        let res_read_req = json!({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "resources/read",
+            "params": {
+                "uri": "niodb://schema"
+            }
+        });
+        let (status, res_read) = request(&router, "POST", "/mcp", Some("alice"), res_read_req, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(res_read["result"]["contents"][0]["text"].as_str().unwrap().contains("knowledge"));
 
         // Test Admin Vacuum
         let (status, vacuum_res) = request(&router, "POST", "/api/v1/admin/vacuum", Some("alice"), Value::Null, None).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(vacuum_res["success"], true);
+    }
+
+    #[tokio::test]
+    async fn user_sessions_row_level_security_and_watch() {
+        let directory = Directory::new();
+        let router = router(app(&directory, Duration::from_secs(2)));
+
+        // 1. Register Alice and Bob
+        let reg_alice = json!({"username":"alice_user","password":"example-long-password-1"});
+        let (status, user1) = request(&router, "POST", "/auth/register", Some("alice"), reg_alice, None).await;
+        assert_eq!(status, StatusCode::CREATED);
+        let alice_uid = user1["user"]["id"].as_str().unwrap().to_string();
+
+        let reg_bob = json!({"username":"bob_user","password":"example-long-password-2"});
+        let (status, _user2) = request(&router, "POST", "/auth/register", Some("alice"), reg_bob, None).await;
+        assert_eq!(status, StatusCode::CREATED);
+
+        // 2. Login both users
+        let login_alice = json!({"username":"alice_user","password":"example-long-password-1"});
+        let (_, login1_res) = request(&router, "POST", "/auth/login", None, login_alice, None).await;
+        let token_alice = login1_res["access_token"].as_str().unwrap().to_string();
+
+        let login_bob = json!({"username":"bob_user","password":"example-long-password-2"});
+        let (_, login2_res) = request(&router, "POST", "/auth/login", None, login_bob, None).await;
+        let token_bob = login2_res["access_token"].as_str().unwrap().to_string();
+
+        // 3. Alice creates a private note (auto stamped with owner_id = alice_uid)
+        let note1 = json!({
+            "collection": "notes",
+            "data": {
+                "title": "Alice's Private Secret Note"
+            }
+        });
+        let (status, created_note) = request(&router, "POST", "/api/v1/records", Some(&token_alice), note1, None).await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(created_note["data"]["owner_id"], alice_uid);
+        let note1_id = created_note["id"].as_str().unwrap().to_string();
+
+        // 4. Bob lists notes: should NOT see Alice's note
+        let (status, bob_notes) = request(&router, "GET", "/api/v1/records?collection=notes", Some(&token_bob), Value::Null, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(bob_notes["items"].as_array().unwrap().len(), 0);
+
+        // 5. Bob tries to read Alice's note by ID: 404
+        let note_url = format!("/api/v1/records/{note1_id}");
+        let (status, _) = request(&router, "GET", &note_url, Some(&token_bob), Value::Null, None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        // 6. Bob tries to update or delete Alice's note: 404
+        let (status, _) = request(&router, "PATCH", &note_url, Some(&token_bob), json!({"title":"Hacked"}), None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (status, _) = request(&router, "DELETE", &note_url, Some(&token_bob), Value::Null, None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        // 7. Alice creates a public record
+        let pub_note = json!({
+            "collection": "notes",
+            "data": {
+                "title": "Public Community Guidelines",
+                "is_public": true
+            }
+        });
+        let (status, _) = request(&router, "POST", "/api/v1/records", Some(&token_alice), pub_note, None).await;
+        assert_eq!(status, StatusCode::CREATED);
+
+        // 8. Bob lists notes: now sees the public note
+        let (status, bob_notes_after) = request(&router, "GET", "/api/v1/records?collection=notes", Some(&token_bob), Value::Null, None).await;
+        assert_eq!(status, StatusCode::OK);
+        let items = bob_notes_after["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["data"]["title"], "Public Community Guidelines");
+
+        // 9. Alice updates her own private note: 200 OK
+        let (status, updated_note) = request(&router, "PATCH", &note_url, Some(&token_alice), json!({"title":"Updated Note"}), None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(updated_note["data"]["title"], "Updated Note");
+
+        // 10. Admin can see both
+        let (status, admin_notes) = request(&router, "GET", "/api/v1/records?collection=notes", Some("alice"), Value::Null, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(admin_notes["items"].as_array().unwrap().len(), 2);
     }
 
     #[tokio::test]

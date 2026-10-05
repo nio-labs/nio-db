@@ -94,6 +94,9 @@ before((_, done) => {
       } else if (req.url.startsWith('/api/v1/query') && req.method === 'POST') {
         res.writeHead(200);
         res.end(JSON.stringify({ items: [{ total: 42 }], count: 1 }));
+      } else if (req.url.startsWith('/mcp') && req.method === 'POST') {
+        res.writeHead(200);
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: parsedBody?.id, result: { tools: [] } }));
       } else {
         res.writeHead(404);
         res.end(JSON.stringify({ error: { message: 'Not found' } }));
@@ -204,4 +207,10 @@ test('nio-db.js Nio0 tasks and events', async () => {
 
   const ev = await db.events.publish('task:progress', { percent: 50 });
   assert.equal(ev.event, 'task:progress');
+});
+
+test('nio-db.js mcp client', async () => {
+  const db = createNioDB({ url: baseUrl });
+  const res = await db.mcp('tools/list');
+  assert.equal(res.jsonrpc, '2.0');
 });

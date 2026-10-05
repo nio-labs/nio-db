@@ -419,8 +419,17 @@ impl Store {
         secure_dir(root)?;
         secure_dir(&root.join("artifacts"))?;
         let lock = private_file(&root.join("server.lock"), false)?;
-        lock.try_lock()
-            .map_err(|_| io::Error::other("another server owns this data directory"))?;
+        let mut locked = lock.try_lock();
+        if locked.is_err() {
+            for _ in 0..5 {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                locked = lock.try_lock();
+                if locked.is_ok() {
+                    break;
+                }
+            }
+        }
+        locked.map_err(|_| io::Error::other("another server owns this data directory"))?;
         secure_dir(&root.join("storage"))?;
         secure_dir(&root.join("uploads"))?;
         let journal = private_file(&root.join("journal.jsonl"), false)?;
@@ -768,6 +777,70 @@ impl Store {
             .cloned()
     }
 
+    pub fn is_record_visible(
+        &self,
+        artifact: &Artifact,
+        user_id: Option<&str>,
+        owned_files: Option<&BTreeMap<&str, &str>>,
+    ) -> bool {
+        let file_owner = if let Some(owned_files) = owned_files {
+            owned_files.get(artifact.id.as_str()).copied()
+        } else {
+            self.files
+                .values()
+                .find(|f| f.artifact_id == artifact.id)
+                .and_then(|f| f.user_id.as_deref())
+        };
+
+        if let Some(owner) = file_owner {
+            return Some(owner) == user_id;
+        }
+
+        let Some(user_id) = user_id else {
+            return true;
+        };
+
+        // Explicitly public record
+        if artifact.data.get("is_public").and_then(Value::as_bool) == Some(true) {
+            return true;
+        }
+
+        // Record owned by user
+        if let Some(owner) = artifact
+            .data
+            .get("owner_id")
+            .or_else(|| artifact.data.get("user_id"))
+            .and_then(Value::as_str)
+        {
+            return owner == user_id;
+        }
+
+        // Records without an explicit owner or not in files collection are shared across workspace
+        true
+    }
+
+    pub fn can_mutate_record(&self, artifact: &Artifact, user_id: Option<&str>) -> bool {
+        let Some(user_id) = user_id else {
+            return true;
+        };
+
+        if let Some(file) = self.files.values().find(|f| f.artifact_id == artifact.id) {
+            return file.user_id.as_deref() == Some(user_id);
+        }
+
+        if let Some(owner) = artifact
+            .data
+            .get("owner_id")
+            .or_else(|| artifact.data.get("user_id"))
+            .and_then(Value::as_str)
+        {
+            return owner == user_id;
+        }
+
+        // If an app user tries to mutate a record they do not own
+        false
+    }
+
     pub fn get_visible(
         &self,
         workspace: &str,
@@ -775,14 +848,7 @@ impl Store {
         user_id: Option<&str>,
     ) -> Option<Artifact> {
         self.get(workspace, id).filter(|artifact| {
-            self.files
-                .values()
-                .find(|file| file.artifact_id == artifact.id)
-                .is_none_or(|file| {
-                    file.user_id
-                        .as_deref()
-                        .is_none_or(|owner| Some(owner) == user_id)
-                })
+            self.is_record_visible(artifact, user_id, None)
         })
     }
 
@@ -798,6 +864,9 @@ impl Store {
             Some(a) => a,
             None => return Ok(None),
         };
+        if !self.can_mutate_record(&current, user_id) {
+            return Ok(None);
+        }
 
         let mut new_data = if merge {
             let mut merged = current.data.clone();
@@ -854,6 +923,9 @@ impl Store {
             Some(a) => a,
             None => return Ok(false),
         };
+        if !self.can_mutate_record(&current, user_id) {
+            return Ok(false);
+        }
         self.commit(Event::ArtifactDeleted {
             id: current.id.clone(),
         })?;
@@ -957,9 +1029,7 @@ impl Store {
         self.list(workspace, kind)
             .into_iter()
             .filter(|artifact| {
-                owned_files
-                    .get(artifact.id.as_str())
-                    .is_none_or(|owner| Some(*owner) == user_id)
+                self.is_record_visible(artifact, user_id, Some(&owned_files))
             })
             .collect()
     }

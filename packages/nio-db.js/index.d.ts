@@ -90,6 +90,7 @@ export interface CollectionClient {
   deleteMany(ids: string[] | Array<{ id: string }>, options?: any): Promise<{ success: boolean; deleted: number; deleted_ids: string[] }>;
   bulkDelete(ids: string[] | Array<{ id: string }>, options?: any): Promise<{ success: boolean; deleted: number; deleted_ids: string[] }>;
   searchVector(options: VectorSearchOptions): Promise<{ items: any[]; count: number }>;
+  watch(callback: (event: { event: string; collection?: string; record?: any; id?: string }) => void): () => void;
 }
 
 export interface SessionClient {
@@ -124,6 +125,8 @@ export class NioDB {
   query(sql: string): Promise<{ items: any[]; metrics?: any }>;
   vacuum(): Promise<{ success: boolean; stats: VacuumStats }>;
   getTools(): Promise<{ tools: any[] }>;
+  bulk(operations: any): Promise<any>;
+  mcp(method: string, params?: Record<string, any>): Promise<any>;
   readonly sessions: SessionsClient;
   session(sessionId: string): SessionClient;
   readonly tasks: TasksClient;

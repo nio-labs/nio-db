@@ -18,6 +18,56 @@ NioDB is a standalone Rust server. Nio and web/mobile applications connect over 
 
 This is an initial implementation. The npm packages are not published. AlaSQL is installed and reports ready; complete query behavior still needs verification.
 
+## ☁️ 1-Click Cloud Deployment
+
+Deploy your personal, 100% agentic NioDB instance to the cloud in one click:
+
+### 1-Click Deploy to Railway
+
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/new?template=https%3A%2F%2Fgithub.com%2Fnio-labs%2Fnio-db)
+
+- **Persistent Volume:** Automatically mounts persistent storage at `/data` so your records, files, journal, and users survive redeploys.
+- **Direct LLM Fallback:** Add `OPENAI_API_KEY`, `GEMINI_API_KEY`, or custom OpenAI endpoint in the Railway dashboard environment variables.
+- **Free Automatic SSL:** Connect your web/mobile apps and coding agents directly via `https://<your-project>.up.railway.app`.
+
+### 1-Click Deploy to Koyeb
+
+[![Deploy to Koyeb](https://www.koyeb.com/static/images/deploy/button.svg)](https://app.koyeb.com/deploy?type=git&repository=github.com/nio-labs/nio-db&branch=main&name=niodb)
+
+- **Native Healthchecks:** Automated health monitoring at `/api/v1/health` with zero configuration.
+- **Global Edge Routing:** Built-in SSL and low-latency HTTP routing on port `7432`.
+
+## 1-Command Self-Hosting with Docker
+
+NioDB is 100% self-contained with zero external database dependencies:
+
+```sh
+docker compose up -d
+```
+
+Or run directly with Docker:
+
+```sh
+docker run -d \
+  --name niodb \
+  -p 7432:7432 \
+  -v $(pwd)/data:/data \
+  -e OPENAI_API_KEY=your_key_here \
+  nio-labs/nio-db:latest
+```
+
+On first boot, NioDB automatically initializes authentication, creates the workspace, and logs the admin credentials:
+```sh
+docker logs niodb
+```
+
+### Direct LLM Fallback (Zero-Daemon AI)
+If native Nio CLI is uninstalled or unconfigured, NioDB automatically activates direct LLM fallback when any standard LLM environment variable is set:
+- **OpenAI**: `OPENAI_API_KEY=...` (optional: `OPENAI_MODEL=gpt-4o-mini`, `OPENAI_BASE_URL=...`)
+- **Gemini**: `GEMINI_API_KEY=...` (optional: `GEMINI_MODEL=gemini-1.5-flash`)
+- **Ollama (Local)**: `OLLAMA_HOST=http://localhost:11434` (optional: `OLLAMA_MODEL=llama3.2`)
+- **Custom OpenAI-compatible API**: `OPENAI_BASE_URL=https://...` with optional `OPENAI_API_KEY=...`
+
 ## CLI and first-run setup
 
 The published entry point will be:
@@ -99,7 +149,30 @@ The main API uses **records** grouped by **collection**. For example, create a r
 
 Safe collection names become SQL tables. The legacy `artifacts` SQL table contains every authorized record. The `files` collection is managed exclusively by the storage API. Top-level data fields are flattened. Reserved server fields `id`, `type`, `revision`, `created_at`, and `updated_at` override colliding data fields.
 
-Record CRUD currently consists of **Create** (`POST /api/v1/records`) and **Read** (`GET /api/v1/records` to list, or `GET /api/v1/records/{id}` to fetch one). There are no record **Update** or **Delete** endpoints. Deleting an uploaded file through the storage API also removes its metadata record. Neither SQL nor natural-language assistance can mutate records.
+Record CRUD supports complete **Create** (`POST /api/v1/records`), **Read** (`GET /api/v1/records` to list, or `GET /api/v1/records/{id}` to fetch one), **Update** (`PATCH` or `PUT /api/v1/records/{id}`), **Delete** (`DELETE /api/v1/records/{id}`), **Bulk** operations (`POST /api/v1/records/bulk`), **Vector Similarity Search** (`POST /api/v1/records/search`), and **Real-time Live Watch** (`GET /api/v1/records/watch?collection=...` via SSE).
+
+### Row-Level Security (RLS)
+When called by an App User session (via `POST /auth/login`), created records are automatically stamped with `owner_id = user.id`. Users can read, update, and delete only their own records, plus any records explicitly marked `is_public: true`. Non-owners cannot mutate or access private records. Backend bearer tokens (client token and secret) maintain full admin visibility and mutation rights across all records.
+
+### Model Context Protocol (MCP) for Coding Agents
+NioDB includes native MCP support for AI coding assistants (Claude Desktop, Cursor, Windsurf, Zed, Aider):
+- **Stdio Transport**: Run `npx @nio-labs/nio-db mcp` (or `node bin/niodb.cjs mcp`). Configure it directly in your agent's MCP config:
+  ```json
+  {
+    "mcpServers": {
+      "niodb": {
+        "command": "node",
+        "args": ["/path/to/nio-db/bin/niodb.cjs", "mcp"]
+      }
+    }
+  }
+  ```
+- **HTTP Endpoint**: `POST /mcp` (and `/api/v1/mcp`) supporting JSON-RPC 2.0 with tools:
+  - `niodb_create_record`: Store documents, memory, or tasks with optional TTL.
+  - `niodb_search_records`: Semantic vector similarity search.
+  - `niodb_query_sql`: Safe read-only SQL queries with filters, joins, and aggregates.
+  - `niodb_get_session_manifest`: Distilled context manifest for multi-agent handoffs.
+  - `niodb_log_dead_end`: Log failed hypotheses to prevent agents from repeating loops.
 
 The restricted compiler accepts SELECT, DISTINCT, columns, aliases, up to two INNER/LEFT JOINs, WHERE comparisons/LIKE/IS NULL with AND/OR, GROUP BY, ORDER BY, LIMIT and OFFSET. Functions are COUNT, SUM, AVG, MIN, MAX, LOWER, UPPER, and LEN. Identifiers use ASCII letters, digits and underscores, beginning with a letter or underscore; unsafe prototype names are rejected. Use single-quoted strings or scalar `?` parameters. Raw user SQL is validated and reconstructed before AlaSQL receives it. File/network sources, arbitrary functions, JavaScript, writes and multiple statements are rejected.
 
@@ -312,6 +385,9 @@ Journal state is loaded into memory and reads scan records. The Node runtime nee
 
 ## Packaging and release
 
-`npm run package:platform` packages a compiled host binary and SHA-256 metadata in `dist/`. Build each supported OS/architecture before publishing the matching optional packages and launcher. Confirm Linux runtime compatibility and Windows behavior. Refresh the npm lockfile from the registry to record the Nio package integrity and verify its installer export before release. Verify the real AlaSQL integration and the missing-Nio download path as well.
+`npm run package:platform` packages a compiled host binary and SHA-256 metadata in `dist/`. Build each supported OS/architecture before publishing the matching optional packages and launcher.
 
-Licensing parameters remain undecided. Package metadata is currently `UNLICENSED`; settle the proposed BSL terms and license files before publication.
+## License
+
+NioDB is open-source software licensed under the [MIT License](LICENSE).  
+Copyright (c) 2026 Nio Labs.

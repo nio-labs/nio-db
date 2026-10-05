@@ -1,0 +1,28 @@
+name: niodb
+services:
+  - name: niodb
+    type: web
+    routes:
+      - path: /
+        port: 7432
+    regions:
+      - fra
+    ports:
+      - port: 7432
+        protocol: http
+    scalings:
+      - min: 1
+        max: 1
+    health_checks:
+      - http:
+          path: /api/v1/health
+          port: 7432
+        interval: 10
+        timeout: 5
+        healthy_threshold: 1
+        unhealthy_threshold: 3
+    env:
+      - key: PORT
+        value: "7432"
+      - key: NIODB_DATA
+        value: "/data"

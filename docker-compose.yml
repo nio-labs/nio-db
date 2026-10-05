@@ -1,0 +1,23 @@
+services:
+  niodb:
+    build: .
+    image: nio-labs/nio-db:latest
+    container_name: niodb
+    restart: unless-stopped
+    ports:
+      - "7432:7432"
+    volumes:
+      - ./data:/data
+    environment:
+      - PORT=7432
+      # Optional Direct LLM Fallback (works when Nio CLI is not mounted):
+      # - OPENAI_API_KEY=your_key_here
+      # - OPENAI_MODEL=gpt-4o-mini
+      # - OLLAMA_HOST=http://host.docker.internal:11434
+      # - GEMINI_API_KEY=your_key_here
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7432/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

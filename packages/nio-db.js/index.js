@@ -140,7 +140,52 @@ class NioDB {
         };
         return db._request("/api/v1/records/search", "POST", payload);
       },
+
+      watch(callback) {
+        let path = `/api/v1/records/watch?collection=${encodeURIComponent(name)}`;
+        let url = `${db.url}${path}`;
+        if (db.workspaceId) url += `&workspace_id=${encodeURIComponent(db.workspaceId)}`;
+        const headers = {};
+        if (db.token) headers["Authorization"] = `Bearer ${db.token}`;
+
+        const controller = new AbortController();
+        fetch(url, { headers, signal: controller.signal })
+          .then(async (res) => {
+            if (!res.ok || !res.body) return;
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split("\n\n");
+              buffer = lines.pop() || "";
+              for (const block of lines) {
+                const dataLine = block.split("\n").find(l => l.startsWith("data: "));
+                if (dataLine) {
+                  try {
+                    const parsed = JSON.parse(dataLine.slice(6));
+                    callback(parsed);
+                  } catch {}
+                }
+              }
+            }
+          })
+          .catch(() => {});
+
+        return () => controller.abort();
+      },
     };
+  }
+
+  async mcp(method, params = {}) {
+    return this._request("/mcp", "POST", {
+      jsonrpc: "2.0",
+      id: Date.now(),
+      method,
+      params,
+    });
   }
 
   async bulk(operations) {

@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: NioDB API
   summary: NioDB — The Agentic DB that works.
-  version: 0.1.1
+  version: 1.0.0
   description: A lightweight database with natural-language queries, powered by Nio.
     Each Rust server has one workspace; clients do not supply workspace IDs. Nio CLI
     powers chat and read queries. AlaSQL executes restricted SQL. Recovery uses a
@@ -250,6 +250,62 @@ paths:
       responses:
         '200':
           description: Bulk operation summary
+          content:
+            application/json:
+              schema:
+                type: object
+        default:
+          $ref: '#/components/responses/Error'
+  /api/v1/records/watch:
+    get:
+      operationId: watchRecords
+      summary: Real-time record subscription stream (SSE)
+      description: Stream real-time record creations, updates, and deletions filtered by collection and Row-Level Security.
+      parameters:
+      - name: collection
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Target collection name to watch
+      responses:
+        '200':
+          description: Server-Sent Events stream of record operations
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        default:
+          $ref: '#/components/responses/Error'
+  /mcp:
+    post:
+      operationId: mcpHandler
+      summary: Model Context Protocol (MCP) JSON-RPC 2.0 endpoint
+      description: Native MCP endpoint for AI coding agents (Claude, Cursor, Windsurf) to execute tools, manage memory, and perform vector/SQL queries.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - method
+              properties:
+                jsonrpc:
+                  type: string
+                  example: "2.0"
+                id:
+                  oneOf:
+                  - type: integer
+                  - type: string
+                method:
+                  type: string
+                  example: "tools/call"
+                params:
+                  type: object
+      responses:
+        '200':
+          description: MCP JSON-RPC 2.0 response
           content:
             application/json:
               schema:
