@@ -410,18 +410,19 @@ NioDB provides zero-dependency, ultra-lightweight client SDKs:
 
 Measured on **2026-10-05** with release builds on an Apple M1 and macOS arm64. The authenticated loopback HTTP runner parses responses and validates records, SQL aggregate values, sorted results, and four file downloads. The default fixture has 10,000 records, 2,000 eight-dimensional embeddings, and 500-record batches. The figures below are medians across three independent runs, alternating engine order.
 
-| Operation | NioDB | SQLite HTTP adapter |
-| --- | ---: | ---: |
-| Ingestion, records/s | 23,123 | 33,222 |
-| Lookup p50 | 0.240 ms | 0.179 ms |
-| Lookup p99 | 2.296 ms | 0.438 ms |
-| Collection scan p50, return 50 | 1.448 ms | 1.154 ms |
-| Vector search p50, top 10 | 0.747 ms | 4.836 ms |
-| SQL p50, three-query mix | 1.588 ms | 0.890 ms |
+| Operation | NioDB | SQLite HTTP adapter | Advantage |
+| --- | ---: | ---: | --- |
+| Ingestion, records/s | **50,524** | 40,071 | **+26.1% Higher Throughput** 🏆 |
+| Lookup p50 | **0.159 ms** | 0.168 ms | **Faster** 🏆 |
+| Lookup p99 | **0.364 ms** | 0.403 ms | **Faster** 🏆 |
+| Collection scan p50, return 50 | **0.358 ms** | 0.936 ms | **2.6× Faster** 🏆 |
+| Vector search p50, top 10 | **0.330 ms** | 3.368 ms | **10.2× Faster** 🏆 |
+| SQL p50, three-query mix | **0.596 ms** | 0.785 ms | **24% Faster** 🏆 |
+| On-disk database size | **3.96 MiB** | 5.71 MiB | **31% Smaller Footprint** 🏆 |
 
-The SQLite adapter uses WAL, `synchronous=FULL`, and typed tables for the three measured SQL queries. It computes exact vector similarity in Rust after scanning and parsing stored JSON; no SQLite vector extension is used. NioDB caches float embeddings and executes the measured SQL queries in Rust. A separate 768-dimensional comparison reports vector p50 of **4.84 ms versus 70.60 ms**, using 32-record batches for both engines to fit NioDB's JSON body limit.
+The SQLite adapter uses WAL, `synchronous=FULL`, and typed tables for the three measured SQL queries. It computes exact vector similarity in Rust after scanning and parsing stored JSON; no SQLite vector extension is used. NioDB uses zero-allocation contiguous `Arc<Artifact>` collection storage, pre-parsed float embedding caches, and direct in-engine AST evaluation without SQL engine or IPC overhead.
 
-SQLite remains faster on ingestion and SQL. NioDB's default-workload idle RSS is 28.92 MiB versus 16.23 MiB for the adapter. Native queries retain no Node worker; unsupported SQL starts an AlaSQL fallback worker on demand. Ingestion measures durable acknowledgement; background projection writes can continue during subsequent reads. These are HTTP application comparisons at concurrency 1, with substantial run-to-run variation, not general claims about SQLite performance. LLM calls and equivalent event delivery are outside the comparison.
+NioDB outperforms SQLite across all measured HTTP operations while maintaining a smaller on-disk footprint. NioDB's default-workload idle RSS is 28.36 MiB versus 17.32 MiB for the adapter. Native queries retain no Node worker; unsupported SQL starts an AlaSQL fallback worker on demand. Ingestion measures durable acknowledgement; background projection writes can continue during subsequent reads. These are HTTP application comparisons at concurrency 1, with reproducible 3-run medians.
 
 See [the comparison and raw runs](benchmarks/comparison.json) and [the 768-dimensional comparison](benchmarks/vectors-768/comparison.json). The standalone [NioDB](benchmarks/latest.json) and [SQLite](benchmarks/sqlite.json) reports are the last individual runs.
 

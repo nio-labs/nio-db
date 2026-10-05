@@ -1,9 +1,9 @@
 {
-  "measured_at": "2026-10-05T14:12:18.507Z",
+  "measured_at": "2026-10-05T15:36:48.670Z",
   "engine": "NioDB",
-  "engine_version": "1.0.1",
-  "binary_sha256": "4c71656e12cc4d2ed09c6734514027cb4083a2a60f2ed5cbcc945b45d5430aa6",
-  "version": "1.0.1",
+  "engine_version": "1.0.2",
+  "binary_sha256": "c1b6e6a553969096a4983dffb49e28914364a6fea31a99399c89328ad92d8834",
+  "version": "1.0.2",
   "environment": {
     "os": "Darwin 25.3.0",
     "arch": "arm64",
@@ -42,178 +42,178 @@
     "event_handlers": 0
   },
   "ingestion": {
-    "total_ms": 586.2041669999999,
-    "records_per_second": 17058.902960681276,
+    "total_ms": 193.83179200000006,
+    "records_per_second": 51591.12391634906,
     "batch_latency": {
       "samples": 20,
-      "mean_ms": 29.26907920000002,
-      "p50_ms": 31.294792000000143,
-      "p95_ms": 45.73562500000003,
-      "p99_ms": 45.872749999999996,
-      "max_ms": 45.872749999999996
+      "mean_ms": 9.678237450000006,
+      "p50_ms": 9.765500000000088,
+      "p95_ms": 10.601375000000075,
+      "p99_ms": 10.640166999999906,
+      "max_ms": 10.640166999999906
     }
   },
   "latency": {
     "point_lookup": {
       "samples": 1000,
-      "mean_ms": 0.9033232829999911,
-      "p50_ms": 0.5793330000001333,
-      "p95_ms": 1.4954589999997552,
-      "p99_ms": 8.184166999999889,
-      "max_ms": 63.624874999999975
+      "mean_ms": 0.17891961500000103,
+      "p50_ms": 0.1593750000000682,
+      "p95_ms": 0.24387500000000273,
+      "p99_ms": 0.3637090000000853,
+      "max_ms": 3.3021250000000464
     },
     "collection_scan": {
       "samples": 100,
-      "mean_ms": 2.443300900000022,
-      "p50_ms": 2.353791999999885,
-      "p95_ms": 3.02279099999987,
-      "p99_ms": 3.734375,
-      "max_ms": 4.066749999999956
+      "mean_ms": 0.4150208600000053,
+      "p50_ms": 0.3662499999999227,
+      "p95_ms": 0.5730419999999867,
+      "p99_ms": 1.0659580000000233,
+      "max_ms": 1.551499999999919
     },
     "vector_search": {
       "samples": 100,
-      "mean_ms": 1.1404100100000187,
-      "p50_ms": 1.0657500000002074,
-      "p95_ms": 1.4515830000000278,
-      "p99_ms": 2.236083000000235,
-      "max_ms": 2.3184590000000753
+      "mean_ms": 0.36225167999999486,
+      "p50_ms": 0.3297499999998763,
+      "p95_ms": 0.4058749999999236,
+      "p99_ms": 1.4086670000001504,
+      "max_ms": 2.0520829999998114
     },
     "sql": {
       "samples": 90,
-      "mean_ms": 3.0025393555555486,
-      "p50_ms": 2.92837499999996,
-      "p95_ms": 4.2339170000000195,
-      "p99_ms": 9.986417000000074,
-      "max_ms": 9.986417000000074
+      "mean_ms": 0.684515277777771,
+      "p50_ms": 0.5962090000000444,
+      "p95_ms": 1.1971250000001419,
+      "p99_ms": 1.570791999999983,
+      "max_ms": 1.570791999999983
     },
     "sql_by_query": [
       {
         "query": "SELECT plan, COUNT(*) AS user_count, AVG(credits) AS avg_credits FROM customers GROUP BY plan",
         "samples": 30,
-        "mean_ms": 2.298079233333359,
-        "p50_ms": 2.3486250000000837,
-        "p95_ms": 2.9048330000000533,
-        "p99_ms": 3.2943749999999454,
-        "max_ms": 3.2943749999999454
+        "mean_ms": 0.4942888333333485,
+        "p50_ms": 0.4446250000000873,
+        "p95_ms": 0.6643750000000637,
+        "p99_ms": 1.376540999999861,
+        "max_ms": 1.376540999999861
       },
       {
         "query": "SELECT service, AVG(latency_ms) AS avg_latency FROM telemetry WHERE status = 'ok' GROUP BY service",
         "samples": 30,
-        "mean_ms": 3.6352138333333337,
-        "p50_ms": 3.464458000000377,
-        "p95_ms": 4.845166999999947,
-        "p99_ms": 5.041916000000128,
-        "max_ms": 5.041916000000128
+        "mean_ms": 0.9151097666666601,
+        "p50_ms": 0.8396250000000691,
+        "p95_ms": 1.3896250000000236,
+        "p99_ms": 1.56512500000008,
+        "max_ms": 1.56512500000008
       },
       {
         "query": "SELECT name, email, credits FROM customers ORDER BY credits DESC LIMIT 5",
         "samples": 30,
-        "mean_ms": 2.837004166666687,
-        "p50_ms": 2.616125000000011,
-        "p95_ms": 3.2936249999997926,
-        "p99_ms": 9.685375000000022,
-        "max_ms": 9.685375000000022
+        "mean_ms": 0.52367220000001,
+        "p50_ms": 0.44391700000005585,
+        "p95_ms": 1.0770830000001297,
+        "p99_ms": 1.19662500000004,
+        "max_ms": 1.19662500000004
       }
     ],
     "event_publish": {
       "samples": 50,
-      "mean_ms": 0.38856999999998154,
-      "p50_ms": 0.3255420000000413,
-      "p95_ms": 0.7232910000000174,
-      "p99_ms": 1.5013750000000528,
-      "max_ms": 1.5013750000000528
+      "mean_ms": 0.3748599999999942,
+      "p50_ms": 0.3212909999999738,
+      "p95_ms": 0.6799169999999322,
+      "p99_ms": 0.95637499999998,
+      "max_ms": 0.95637499999998
     }
   },
   "storage": {
-    "total_bytes": 7775879,
+    "total_bytes": 4153832,
     "journal_bytes": 4085167,
     "file_payload_bytes": 65746,
-    "server_rss_bytes": 30326784,
+    "server_rss_bytes": 28491776,
     "memory_stages": [
       {
         "stage": "startup",
-        "rust_rss_bytes": 9322496,
+        "rust_rss_bytes": 9338880,
         "rust_peak_rss_bytes": null,
         "sql_worker_count": 0,
         "sql_workers_rss_bytes": 0,
-        "combined_rss_bytes": 9322496,
+        "combined_rss_bytes": 9338880,
         "rust_pss_bytes": null,
         "sql_workers_pss_bytes": null,
         "combined_pss_bytes": null
       },
       {
         "stage": "after_files",
-        "rust_rss_bytes": 10272768,
+        "rust_rss_bytes": 10207232,
         "rust_peak_rss_bytes": null,
         "sql_worker_count": 0,
         "sql_workers_rss_bytes": 0,
-        "combined_rss_bytes": 10272768,
+        "combined_rss_bytes": 10207232,
         "rust_pss_bytes": null,
         "sql_workers_pss_bytes": null,
         "combined_pss_bytes": null
       },
       {
         "stage": "after_ingestion",
-        "rust_rss_bytes": 30015488,
+        "rust_rss_bytes": 28164096,
         "rust_peak_rss_bytes": null,
         "sql_worker_count": 0,
         "sql_workers_rss_bytes": 0,
-        "combined_rss_bytes": 30015488,
+        "combined_rss_bytes": 28164096,
         "rust_pss_bytes": null,
         "sql_workers_pss_bytes": null,
         "combined_pss_bytes": null
       },
       {
         "stage": "after_lookups",
-        "rust_rss_bytes": 30031872,
+        "rust_rss_bytes": 28229632,
         "rust_peak_rss_bytes": null,
         "sql_worker_count": 0,
         "sql_workers_rss_bytes": 0,
-        "combined_rss_bytes": 30031872,
+        "combined_rss_bytes": 28229632,
         "rust_pss_bytes": null,
         "sql_workers_pss_bytes": null,
         "combined_pss_bytes": null
       },
       {
         "stage": "after_scans",
-        "rust_rss_bytes": 30064640,
+        "rust_rss_bytes": 28229632,
         "rust_peak_rss_bytes": null,
         "sql_worker_count": 0,
         "sql_workers_rss_bytes": 0,
-        "combined_rss_bytes": 30064640,
+        "combined_rss_bytes": 28229632,
         "rust_pss_bytes": null,
         "sql_workers_pss_bytes": null,
         "combined_pss_bytes": null
       },
       {
         "stage": "after_vectors",
-        "rust_rss_bytes": 30162944,
+        "rust_rss_bytes": 28327936,
         "rust_peak_rss_bytes": null,
         "sql_worker_count": 0,
         "sql_workers_rss_bytes": 0,
-        "combined_rss_bytes": 30162944,
+        "combined_rss_bytes": 28327936,
         "rust_pss_bytes": null,
         "sql_workers_pss_bytes": null,
         "combined_pss_bytes": null
       },
       {
         "stage": "after_sql",
-        "rust_rss_bytes": 30326784,
+        "rust_rss_bytes": 28491776,
         "rust_peak_rss_bytes": null,
         "sql_worker_count": 0,
         "sql_workers_rss_bytes": 0,
-        "combined_rss_bytes": 30326784,
+        "combined_rss_bytes": 28491776,
         "rust_pss_bytes": null,
         "sql_workers_pss_bytes": null,
         "combined_pss_bytes": null
       },
       {
         "stage": "idle_2s",
-        "rust_rss_bytes": 30326784,
+        "rust_rss_bytes": 28491776,
         "rust_peak_rss_bytes": null,
         "sql_worker_count": 0,
         "sql_workers_rss_bytes": 0,
-        "combined_rss_bytes": 30326784,
+        "combined_rss_bytes": 28491776,
         "rust_pss_bytes": null,
         "sql_workers_pss_bytes": null,
         "combined_pss_bytes": null
