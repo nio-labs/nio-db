@@ -224,7 +224,7 @@
             </span>
             <span>{{ serverOnline ? 'Server Ready' : 'Server Offline' }}</span>
           </div>
-          <span class="text-[10px] font-mono text-muted-foreground">v0.1.1</span>
+          <span class="text-[10px] font-mono text-muted-foreground">{{ serverVersion }}</span>
         </div>
 
         <div class="flex items-center justify-between text-[11px] px-1.5 pt-1 border-t border-border/50 text-muted-foreground">
@@ -506,16 +506,21 @@
             </div>
 
             <!-- Grid Pagination Footer -->
-            <div class="py-2 px-3 border-t border-border bg-muted/30 flex items-center justify-between text-[11px] text-muted-foreground">
-              <div>
-                Showing <span class="font-medium text-foreground">{{ filteredRecords.length }}</span> records
+            <div class="py-2.5 px-3 border-t border-border bg-muted/30 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
+              <div class="flex items-center gap-2">
+                <span v-if="searchFilter">
+                  Showing <span class="font-medium text-foreground">{{ filteredRecords.length }}</span> matches on page {{ currentPage }} (total {{ totalRecords.toLocaleString() }})
+                </span>
+                <span v-else>
+                  Showing <span class="font-medium text-foreground">{{ totalRecords > 0 ? (currentPage - 1) * limit + 1 : 0 }}</span> - <span class="font-medium text-foreground">{{ Math.min(currentPage * limit, totalRecords) }}</span> of <span class="font-medium text-foreground">{{ totalRecords.toLocaleString() }}</span> records
+                </span>
               </div>
-              <div class="flex items-center gap-2.5">
+              <div class="flex items-center gap-3">
                 <div class="flex items-center gap-1.5">
                   <span>Rows:</span>
                   <select 
                     v-model="limit" 
-                    @change="loadRecords()"
+                    @change="loadRecords(1)"
                     class="h-6 rounded border border-input bg-background px-1.5 text-[11px] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
                   >
                     <option :value="15">15</option>
@@ -524,14 +529,56 @@
                     <option :value="100">100</option>
                   </select>
                 </div>
-                <button 
-                  @click="loadNextPage()"
-                  :disabled="!nextCursor"
-                  class="inline-flex items-center justify-center rounded-md border border-input bg-background px-2.5 h-6 text-[11px] font-medium hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-foreground shadow-sm"
-                >
-                  <span>Next Page</span>
-                  <icon name="arrow-right" class="w-3 h-3 ml-1"></icon>
-                </button>
+
+                <div class="flex items-center gap-1">
+                  <button 
+                    @click="firstPage()" 
+                    :disabled="currentPage <= 1 || recordsLoading"
+                    title="First Page"
+                    class="inline-flex items-center justify-center rounded border border-input bg-background w-6 h-6 text-[11px] font-medium hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-foreground shadow-sm"
+                  >
+                    <icon name="chevrons-left" class="w-3.5 h-3.5"></icon>
+                  </button>
+                  <button 
+                    @click="prevPage()" 
+                    :disabled="currentPage <= 1 || recordsLoading"
+                    title="Previous Page"
+                    class="inline-flex items-center justify-center rounded border border-input bg-background w-6 h-6 text-[11px] font-medium hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-foreground shadow-sm"
+                  >
+                    <icon name="chevron-left" class="w-3.5 h-3.5"></icon>
+                  </button>
+
+                  <div class="flex items-center gap-1 px-1.5 text-[11px]">
+                    <span>Page</span>
+                    <input 
+                      type="number" 
+                      v-model.number="pageInput" 
+                      @keyup.enter="goToPage(pageInput)"
+                      @blur="goToPage(pageInput)"
+                      min="1" 
+                      :max="totalPages"
+                      class="w-12 h-6 text-center rounded border border-input bg-background text-[11px] font-mono focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+                    />
+                    <span>of {{ totalPages.toLocaleString() }}</span>
+                  </div>
+
+                  <button 
+                    @click="nextPage()" 
+                    :disabled="currentPage >= totalPages || recordsLoading"
+                    title="Next Page"
+                    class="inline-flex items-center justify-center rounded border border-input bg-background w-6 h-6 text-[11px] font-medium hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-foreground shadow-sm"
+                  >
+                    <icon name="chevron-right" class="w-3.5 h-3.5"></icon>
+                  </button>
+                  <button 
+                    @click="lastPage()" 
+                    :disabled="currentPage >= totalPages || recordsLoading"
+                    title="Last Page"
+                    class="inline-flex items-center justify-center rounded border border-input bg-background w-6 h-6 text-[11px] font-medium hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-foreground shadow-sm"
+                  >
+                    <icon name="chevrons-right" class="w-3.5 h-3.5"></icon>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -1481,7 +1528,7 @@
                 <div class="flex items-center justify-between p-2.5 rounded bg-muted/30 border border-border">
                   <span class="text-muted-foreground">Database Engine:</span>
                   <span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-teal-500/15 text-teal-700 dark:text-teal-300 border border-teal-500/30">
-                    Online (Rust NioDB v0.1.1)
+                    Online (Rust NioDB {{ serverVersion }})
                   </span>
                 </div>
 
@@ -2290,6 +2337,10 @@
       "list-todo": '<rect x="3" y="5" width="6" height="6" rx="1"></rect><path d="m3 17 2 2 4-4"></path><path d="M13 6h8"></path><path d="M13 12h8"></path><path d="M13 18h8"></path>',
       "trash-2": '<path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line>',
       "chevron-down": '<path d="m6 9 6 6 6-6"></path>',
+      "chevron-left": '<path d="m15 18-6-6 6-6"></path>',
+      "chevron-right": '<path d="m9 18 6-6 6-6"></path>',
+      "chevrons-left": '<path d="m11 17-5-5 5-5"></path><path d="m18 17-5-5 5-5"></path>',
+      "chevrons-right": '<path d="m6 17 5-5-5-5"></path><path d="m13 17 5-5-5-5"></path>',
       "chevrons-up-down": '<path d="m7 15 5 5 5-5"></path><path d="m7 9 5-5 5 5"></path>',
       "check": '<polyline points="20 6 9 17 4 12"></polyline>'
     };
@@ -2338,6 +2389,7 @@
         const tokenInput = ref(token.value);
         const tokenModalOpen = ref(!token.value);
         const serverOnline = ref(false);
+        const serverVersion = ref("v1.0.1");
         const alasqlReady = ref(false);
         const nioStatus = ref("Checking...");
         const toasts = ref([]);
@@ -2351,6 +2403,11 @@
         const vectorDropdownOpen = ref(false);
         const limit = ref(25);
         const nextCursor = ref(null);
+        const currentPage = ref(1);
+        const totalPages = ref(1);
+        const totalRecords = ref(0);
+        const pageInput = ref(1);
+        const knownCollections = ref(new Set(["telemetry", "customers", "ai_memories", "files"]));
         const selectedRecord = ref(null);
         const recordDetailModalOpen = ref(false);
         const newRecordModalOpen = ref(false);
@@ -2360,7 +2417,7 @@
         const selectCollectionFilter = (col) => {
           collectionFilter.value = col;
           collectionDropdownOpen.value = false;
-          loadRecords();
+          loadRecords(1);
         };
 
         const selectVectorCollection = (col) => {
@@ -2527,6 +2584,12 @@
           try {
             const res = await fetch("/health");
             serverOnline.value = res.ok;
+            if (res.ok) {
+              const data = await res.json();
+              if (data.version) {
+                serverVersion.value = 'v' + data.version;
+              }
+            }
           } catch {
             serverOnline.value = false;
           }
@@ -2535,6 +2598,9 @@
             const res = await fetch("/api/v1/status");
             if (res.ok) {
               const data = await res.json();
+              if (data.version) {
+                serverVersion.value = 'v' + data.version;
+              }
               alasqlReady.value = data.alasql?.status === "ready";
               nioStatus.value = data.nio?.status || "Unavailable";
             }
@@ -2576,12 +2642,11 @@
 
         // Data Records
         const collectionsList = computed(() => {
-          const set = new Set();
           records.value.forEach(r => {
             const c = r.collection || r.type;
-            if (c) set.add(c);
+            if (c) knownCollections.value.add(c);
           });
-          return Array.from(set);
+          return Array.from(knownCollections.value).sort();
         });
 
         const filteredRecords = computed(() => {
@@ -2590,11 +2655,14 @@
           return records.value.filter(r => JSON.stringify(r).toLowerCase().includes(q));
         });
 
-        const loadRecords = async (cursor = null) => {
+        const loadRecords = async (page = null) => {
           recordsLoading.value = true;
-          let url = `/api/v1/records?limit=${limit.value}`;
+          if (page !== null) {
+            currentPage.value = Math.max(1, page);
+          }
+          pageInput.value = currentPage.value;
+          let url = `/api/v1/records?limit=${limit.value}&page=${currentPage.value}`;
           if (collectionFilter.value) url += `&collection=${encodeURIComponent(collectionFilter.value)}`;
-          if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
 
           try {
             const res = await api(url);
@@ -2602,8 +2670,16 @@
               const data = await res.json();
               records.value = data.items || [];
               nextCursor.value = data.next_cursor || null;
+              totalRecords.value = typeof data.total === "number" ? data.total : records.value.length;
+              totalPages.value = typeof data.total_pages === "number" ? Math.max(1, data.total_pages) : Math.max(1, Math.ceil(totalRecords.value / limit.value));
+              if (typeof data.page === "number") {
+                currentPage.value = data.page;
+                pageInput.value = data.page;
+              }
             } else {
               records.value = [];
+              totalRecords.value = 0;
+              totalPages.value = 1;
             }
           } catch {
             records.value = [];
@@ -2612,9 +2688,34 @@
           }
         };
 
-        const loadNextPage = () => {
-          if (nextCursor.value) loadRecords(nextCursor.value);
+        const goToPage = (p) => {
+          let target = parseInt(p, 10);
+          if (isNaN(target)) target = 1;
+          target = Math.max(1, Math.min(target, Math.max(1, totalPages.value)));
+          loadRecords(target);
         };
+
+        const nextPage = () => {
+          if (currentPage.value < totalPages.value) {
+            goToPage(currentPage.value + 1);
+          }
+        };
+
+        const prevPage = () => {
+          if (currentPage.value > 1) {
+            goToPage(currentPage.value - 1);
+          }
+        };
+
+        const firstPage = () => {
+          goToPage(1);
+        };
+
+        const lastPage = () => {
+          goToPage(totalPages.value);
+        };
+
+        const loadNextPage = () => nextPage();
 
         const viewRecordDetail = (r) => {
           selectedRecord.value = r;
@@ -3661,6 +3762,7 @@
           clearToken,
           testToken,
           serverOnline,
+          serverVersion,
           alasqlReady,
           nioStatus,
           toasts,
@@ -3677,6 +3779,15 @@
           filteredRecords,
           limit,
           nextCursor,
+          currentPage,
+          totalPages,
+          totalRecords,
+          pageInput,
+          goToPage,
+          nextPage,
+          prevPage,
+          firstPage,
+          lastPage,
           loadRecords,
           loadNextPage,
           selectedRecord,

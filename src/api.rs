@@ -396,11 +396,15 @@ async fn health(
     Extension(id): Extension<RequestId>,
 ) -> Result<Json<Value>, ApiError> {
     storage(&app, &id, |_| Ok(())).await?;
-    Ok(Json(json!({"status":"ok"})))
+    Ok(Json(json!({"status":"ok","version":env!("CARGO_PKG_VERSION")})))
 }
 async fn status(State(app): State<App>) -> Json<Value> {
     Json(
-        json!({"nio":app.nio.readiness,"alasql":{"status":if app.query.ready {"ready"} else {"unavailable"}}}),
+        json!({
+            "version": env!("CARGO_PKG_VERSION"),
+            "nio": app.nio.readiness,
+            "alasql": {"status": if app.query.ready {"ready"} else {"unavailable"}}
+        }),
     )
 }
 
@@ -477,6 +481,8 @@ struct ListQuery {
     cursor: Option<String>,
     #[serde(rename = "type", alias = "collection")]
     kind: Option<String>,
+    page: Option<usize>,
+    offset: Option<usize>,
 }
 fn default_limit() -> usize {
     50
@@ -555,6 +561,18 @@ async fn list(
         Ok(store.list_visible(&workspace, kind.as_deref(), user_id.as_deref()))
     })
     .await?;
+
+    let total_count = records.len();
+    let total_pages = if total_count == 0 { 1 } else { (total_count + query.limit - 1) / query.limit };
+    let current_page = query.page.unwrap_or_else(|| {
+        if let Some(offset) = query.offset {
+            offset / query.limit + 1
+        } else {
+            1
+        }
+    });
+    let current_page = if current_page == 0 { 1 } else { current_page };
+
     if let Some(cursor) = cursor {
         if !records
             .iter()
@@ -568,27 +586,59 @@ async fn list(
             ));
         }
         records.retain(|a| (&a.created_at, &a.id) > (&cursor.created_at, &cursor.id));
-    }
-    let more = records.len() > query.limit;
-    records.truncate(query.limit);
-    let next_cursor = if more {
-        records.last().map(|a| {
-            URL_SAFE_NO_PAD.encode(
-                serde_json::to_vec(&Cursor {
-                    workspace_id: query.workspace_id,
-                    kind: query.kind,
-                    created_at: a.created_at.clone(),
-                    id: a.id.clone(),
-                })
-                .unwrap(),
-            )
-        })
+        let more = records.len() > query.limit;
+        records.truncate(query.limit);
+        let next_cursor = if more {
+            records.last().map(|a| {
+                URL_SAFE_NO_PAD.encode(
+                    serde_json::to_vec(&Cursor {
+                        workspace_id: query.workspace_id,
+                        kind: query.kind,
+                        created_at: a.created_at.clone(),
+                        id: a.id.clone(),
+                    })
+                    .unwrap(),
+                )
+            })
+        } else {
+            None
+        };
+        Ok(Json(json!({
+            "items": records.iter().map(public_value).collect::<Vec<_>>(),
+            "next_cursor": next_cursor,
+            "total": total_count,
+            "page": current_page,
+            "total_pages": total_pages,
+            "limit": query.limit,
+        })))
     } else {
-        None
-    };
-    Ok(Json(
-        json!({"items":records.iter().map(public_value).collect::<Vec<_>>(),"next_cursor":next_cursor}),
-    ))
+        let offset = query.offset.unwrap_or((current_page - 1) * query.limit);
+        let more = offset + query.limit < total_count;
+        let paged_records: Vec<_> = records.iter().skip(offset).take(query.limit).collect();
+        let next_cursor = if more {
+            paged_records.last().map(|a| {
+                URL_SAFE_NO_PAD.encode(
+                    serde_json::to_vec(&Cursor {
+                        workspace_id: query.workspace_id,
+                        kind: query.kind,
+                        created_at: a.created_at.clone(),
+                        id: a.id.clone(),
+                    })
+                    .unwrap(),
+                )
+            })
+        } else {
+            None
+        };
+        Ok(Json(json!({
+            "items": paged_records.into_iter().map(public_value).collect::<Vec<_>>(),
+            "next_cursor": next_cursor,
+            "total": total_count,
+            "page": current_page,
+            "total_pages": total_pages,
+            "limit": query.limit,
+        })))
+    }
 }
 
 async fn list_records(
