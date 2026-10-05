@@ -122,7 +122,7 @@ impl NioPgHandler {
                 FieldFormat::Text,
             )]);
             let mut encoder = DataRowEncoder::new(schema.clone());
-            let v = "PostgreSQL 15.0 (NioDB v1.0.2)";
+            let v = "PostgreSQL 15.0 (NioDB v1.0.3)";
             encoder.encode_field(&v)?;
             let rows = vec![Ok(encoder.take_row())];
             return Ok(Response::Query(QueryResponse::new(schema, stream::iter(rows))));

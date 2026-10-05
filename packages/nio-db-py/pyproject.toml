@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nio-db-py"
-version = "1.0.1"
+version = "1.0.3"
 description = "Ultra-lightweight Python client for NioDB (The Agentic Database)"
 readme = "README.md"
 requires-python = ">=3.8"
