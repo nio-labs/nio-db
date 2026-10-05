@@ -1,6 +1,6 @@
 {
   "name": "@nio-labs/nio-db.js",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Ultra-lightweight JavaScript and TypeScript client for NioDB — the Agentic Database.",
   "main": "index.js",
   "module": "index.js",

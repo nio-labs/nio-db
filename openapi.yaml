@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: NioDB API
   summary: NioDB — The Agentic DB that works.
-  version: 1.0.0
+  version: 1.0.1
   description: A lightweight database with natural-language queries, powered by Nio.
     Each Rust server has one workspace; clients do not supply workspace IDs. Nio CLI
     powers chat and read queries. AlaSQL executes restricted SQL. Recovery uses a
