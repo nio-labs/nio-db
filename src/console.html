@@ -2329,9 +2329,14 @@
         };
 
         // Authentication & Server state
-        const token = ref(localStorage.getItem("niodb_token") || "");
+        const urlParams = new URLSearchParams(window.location.search);
+        const queryToken = urlParams.get("token") || urlParams.get("auth");
+        if (queryToken) {
+          localStorage.setItem("niodb_token", queryToken);
+        }
+        const token = ref(queryToken || localStorage.getItem("niodb_token") || "");
         const tokenInput = ref(token.value);
-        const tokenModalOpen = ref(false);
+        const tokenModalOpen = ref(!token.value);
         const serverOnline = ref(false);
         const alasqlReady = ref(false);
         const nioStatus = ref("Checking...");
