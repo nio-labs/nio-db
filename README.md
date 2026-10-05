@@ -13,7 +13,7 @@ NioDB is a standalone Rust server. Nio and web/mobile applications connect over 
 - Restricted read-only AlaSQL SELECT, bound parameters, joins and aggregates.
 - Nio-assisted queries, clarification, owned conversations and validated record references.
 - Permission-filtered Nio skill/plugin discovery; approved small skills can guide assistance.
-- Built-in Shadcn + Vue 3 Web Console Dashboard at `/console` (and `/`) to manage Data & Queries, Files & Buckets, Live Events & Webhooks, Auth Users, and Server Config.
+- Built-in Shadcn + Vue 3 Web Console Dashboard (accessible in your browser at `http://localhost:7432` or `/console`) to manage Data & Queries, Files & Buckets, Live Events & Webhooks, Auth Users, and Server Config.
 - [OpenAPI 3.1 contract](openapi.yaml), readiness endpoints, offline backup and npm binary launcher.
 
 This is an initial implementation. The npm packages are not published. AlaSQL is installed and reports ready; complete query behavior still needs verification.
@@ -349,7 +349,7 @@ The destination must be a new directory. It contains the consistent journal and 
 
 ## Web Console Dashboard
 
-NioDB serves a built-in administration web console directly from the binary at `GET /console` and `GET /`.
+NioDB includes a built-in administration web console served directly by the server. Open your browser and navigate to `http://localhost:7432` (or `/console`) to access the dashboard.
 It is styled with Vue 3, Shadcn design tokens (unified teal theme, light mode by default with dark toggle), and Google Sans Code font.
 
 - **Data & Query Explorer**: Interactive data grid, collection filters, search, pagination, detailed JSON drawer, new record creation, JSON export, AlaSQL Query Studio (`>_`), and Natural Language Intelligence planning.
