@@ -2,7 +2,7 @@ use crate::{
     auth::{self, Principal},
     nio::{self, Nio, QueryPlan},
     query::{self, AlaSql},
-    storage::{Conversation, Store, new_id},
+    storage::{Artifact, Conversation, Store, new_id},
 };
 use axum::{
     Json, Router,
@@ -25,7 +25,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 mod accounts;
+mod demo;
 mod events;
+pub use demo::{dispatch_demo_event, seed_default_demo};
 pub(crate) mod files;
 
 #[derive(Clone)]
@@ -81,8 +83,10 @@ pub fn router(app: App) -> Router {
         .route("/dashboard", get(|| async { Redirect::permanent("/console") }))
         .route("/health", get(health))
         .route("/doc", get(|| async { Html(include_str!("doc.html")) }))
-        .route("/docs", get(|| async { Redirect::permanent("/docs/") }))
-        .route("/docs/", get(|| async { Html(include_str!("docs.html")) }))
+        .route("/guide", get(|| async { Html(include_str!("guide.html")) }))
+        .route("/guide/", get(|| async { Redirect::permanent("/guide") }))
+        .route("/docs", get(|| async { Redirect::permanent("/guide") }))
+        .route("/docs/", get(|| async { Redirect::permanent("/guide") }))
         .route(
             "/openapi.yaml",
             get(|| async {
@@ -142,7 +146,7 @@ pub fn router(app: App) -> Router {
         )
         .route(
             "/api/v1/events/workers/:id",
-            axum::routing::delete(events::delete_worker),
+            get(events::worker).patch(events::update_worker).delete(events::delete_worker),
         )
         .route(
             "/api/v1/webhooks",
@@ -211,7 +215,7 @@ async fn access(State(app): State<App>, mut request: Request<Body>, next: Next) 
     let preflight = *request.method() == axum::http::Method::OPTIONS && origin.is_some();
     let public = (matches!(
         request.uri().path(),
-        "/" | "/console" | "/dashboard" | "/health" | "/openapi.yaml" | "/doc" | "/docs" | "/docs/" | "/api/v1/agent/tools" | "/api/v1/tools"
+        "/" | "/console" | "/dashboard" | "/health" | "/openapi.yaml" | "/doc" | "/guide" | "/guide/" | "/docs" | "/docs/" | "/api/v1/agent/tools" | "/api/v1/tools"
     ) && matches!(
         *request.method(),
         axum::http::Method::GET | axum::http::Method::HEAD
@@ -376,6 +380,9 @@ async fn storage<T: Send + 'static>(
             "idempotency_conflict",
             "Idempotency key was reused with different data",
         ),
+        std::io::ErrorKind::InvalidInput if matches!(err.to_string().as_str(), "invalid collection name" | "TTL is out of range") => error(
+            id, StatusCode::BAD_REQUEST, "invalid_record", if err.to_string() == "invalid collection name" { "Invalid collection name" } else { "TTL is out of range" },
+        ),
         std::io::ErrorKind::InvalidInput => error(
             id,
             StatusCode::PAYLOAD_TOO_LARGE,
@@ -443,7 +450,7 @@ async fn sql_query(
     authorize(&principal, &body.workspace_id, &id)?;
     let user_id = session.map(|s| s.user.id.clone());
     let records = storage(&app, &id, move |store| {
-        Ok(store.list_visible(&body.workspace_id, None, user_id.as_deref()))
+        Ok(store.snapshot_visible(&body.workspace_id, None, user_id.as_deref()))
     })
     .await?;
     let result = app
@@ -554,91 +561,22 @@ async fn list(
             "Cursor does not match workspace and filters",
         ));
     }
+    let current_page = query.page.unwrap_or_else(|| query.offset.map_or(1, |offset| offset / query.limit + 1)).max(1);
+    let offset = query.offset.unwrap_or_else(|| current_page.saturating_sub(1).saturating_mul(query.limit));
     let workspace = query.workspace_id.clone();
     let kind = query.kind.clone();
     let user_id = session.map(|s| s.user.id.clone());
-    let mut records = storage(&app, &id, move |store| {
-        Ok(store.list_visible(&workspace, kind.as_deref(), user_id.as_deref()))
-    })
-    .await?;
-
-    let total_count = records.len();
-    let total_pages = if total_count == 0 { 1 } else { (total_count + query.limit - 1) / query.limit };
-    let current_page = query.page.unwrap_or_else(|| {
-        if let Some(offset) = query.offset {
-            offset / query.limit + 1
-        } else {
-            1
-        }
-    });
-    let current_page = if current_page == 0 { 1 } else { current_page };
-
-    if let Some(cursor) = cursor {
-        if !records
-            .iter()
-            .any(|a| a.id == cursor.id && a.created_at == cursor.created_at)
-        {
-            return Err(error(
-                &id,
-                StatusCode::BAD_REQUEST,
-                "invalid_cursor",
-                "Cursor anchor is not visible",
-            ));
-        }
-        records.retain(|a| (&a.created_at, &a.id) > (&cursor.created_at, &cursor.id));
-        let more = records.len() > query.limit;
-        records.truncate(query.limit);
-        let next_cursor = if more {
-            records.last().map(|a| {
-                URL_SAFE_NO_PAD.encode(
-                    serde_json::to_vec(&Cursor {
-                        workspace_id: query.workspace_id,
-                        kind: query.kind,
-                        created_at: a.created_at.clone(),
-                        id: a.id.clone(),
-                    })
-                    .unwrap(),
-                )
-            })
-        } else {
-            None
-        };
-        Ok(Json(json!({
-            "items": records.iter().map(public_value).collect::<Vec<_>>(),
-            "next_cursor": next_cursor,
-            "total": total_count,
-            "page": current_page,
-            "total_pages": total_pages,
-            "limit": query.limit,
-        })))
-    } else {
-        let offset = query.offset.unwrap_or((current_page - 1) * query.limit);
-        let more = offset + query.limit < total_count;
-        let paged_records: Vec<_> = records.iter().skip(offset).take(query.limit).collect();
-        let next_cursor = if more {
-            paged_records.last().map(|a| {
-                URL_SAFE_NO_PAD.encode(
-                    serde_json::to_vec(&Cursor {
-                        workspace_id: query.workspace_id,
-                        kind: query.kind,
-                        created_at: a.created_at.clone(),
-                        id: a.id.clone(),
-                    })
-                    .unwrap(),
-                )
-            })
-        } else {
-            None
-        };
-        Ok(Json(json!({
-            "items": paged_records.into_iter().map(public_value).collect::<Vec<_>>(),
-            "next_cursor": next_cursor,
-            "total": total_count,
-            "page": current_page,
-            "total_pages": total_pages,
-            "limit": query.limit,
-        })))
-    }
+    let limit = query.limit;
+    let page = storage(&app, &id, move |store| {
+        let anchor = cursor.as_ref().map(|c| (c.created_at.as_str(), c.id.as_str()));
+        Ok(store.page_visible(&workspace, kind.as_deref(), user_id.as_deref(), anchor, offset, limit))
+    }).await?.ok_or_else(|| error(&id, StatusCode::BAD_REQUEST, "invalid_cursor", "Cursor anchor is not visible"))?;
+    let (records, total, more) = page;
+    let next_cursor = if more { records.last().map(|a| URL_SAFE_NO_PAD.encode(serde_json::to_vec(&Cursor {
+        workspace_id: query.workspace_id, kind: query.kind, created_at: a.created_at.clone(), id: a.id.clone()
+    }).unwrap())) } else { None };
+    Ok(Json(json!({"items":records.iter().map(public_value).collect::<Vec<_>>(), "next_cursor":next_cursor,
+        "total":total,"page":current_page,"total_pages":total.div_ceil(limit).max(1),"limit":limit})))
 }
 
 async fn list_records(
@@ -1359,6 +1297,113 @@ async fn chat(
     .await
 }
 
+fn simple_recent_listing(message: &str) -> bool {
+    let message = message.trim().to_ascii_lowercase();
+    let words: Vec<_> = message
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .collect();
+    ["show ", "list ", "display ", "get "]
+        .iter()
+        .any(|prefix| message.starts_with(prefix))
+        && ["recent", "latest", "newest", "recently created"]
+            .iter()
+            .any(|word| message.contains(word))
+        && ["record", "data", "item"]
+            .iter()
+            .any(|word| message.contains(word))
+        && !["summarize", "explain", "analyze", "compare", "why", "how"]
+            .iter()
+            .any(|word| words.contains(word))
+}
+
+fn simple_recent_plan(message: &str, schema: &Value) -> Option<QueryPlan> {
+    if !simple_recent_listing(message) {
+        return None;
+    }
+    let words: Vec<_> = message
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .filter(|word| !word.is_empty())
+        .collect();
+    let numbers: Vec<_> = words.iter().filter_map(|word| word.parse::<usize>().ok()).collect();
+    if numbers.len() > 1 {
+        return None;
+    }
+    let limit = numbers.first().copied().unwrap_or(10);
+    if !(1..=20).contains(&limit) {
+        return None;
+    }
+    let kinds: Vec<_> = schema.as_object()?.keys().filter(|kind| {
+        let singular = kind.strip_suffix('s').unwrap_or(kind);
+        words.iter().any(|word| {
+            word.eq_ignore_ascii_case(kind) || word.eq_ignore_ascii_case(singular)
+        })
+    }).cloned().collect();
+    if kinds.len() > 1 {
+        return None;
+    }
+    let kind = kinds.into_iter().next();
+    // Only bypass Nio for a complete listing request. Filters, unknown collection
+    // names, and additional instructions must go through the planner.
+    let listing_words = ["show", "list", "display", "get", "me", "the", "most",
+        "recent", "recently", "created", "latest", "newest", "record", "records",
+        "data", "item", "items", "please", "pls", "all"];
+    if words.iter().any(|word| {
+        !listing_words.iter().any(|allowed| word.eq_ignore_ascii_case(allowed))
+            && word.parse::<usize>().is_err()
+            && !kind.as_ref().is_some_and(|kind| {
+                word.eq_ignore_ascii_case(kind)
+                    || word.eq_ignore_ascii_case(kind.strip_suffix('s').unwrap_or(kind))
+            })
+    }) {
+        return None;
+    }
+    Some(QueryPlan {
+        action: "query".into(),
+        kind,
+        text: None,
+        filters: BTreeMap::new(),
+        latest: true,
+        limit,
+        question: None,
+        aggregate: None,
+    })
+}
+
+fn aggregate_sql(
+    aggregate: &nio::AggregatePlan,
+    schema: &Value,
+    where_clause: &str,
+    limit: usize,
+) -> Option<String> {
+    let function = aggregate.function.to_ascii_uppercase();
+    if !["COUNT", "SUM", "AVG", "MIN", "MAX"].contains(&function.as_str()) {
+        return None;
+    }
+    let valid_field = |field: &str| {
+        !field.is_empty() && field.len() <= 64
+            && (field.as_bytes()[0].is_ascii_alphabetic() || field.starts_with('_'))
+            && field.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_')
+            && !["__proto__", "constructor", "prototype"].contains(&field.to_ascii_lowercase().as_str())
+            && (["id", "type", "collection", "revision", "created_at", "updated_at"].contains(&field)
+                || schema.as_object().is_some_and(|types| types.values().any(|fields| {
+                    fields.as_array().is_some_and(|fields| fields.iter().any(|value| value.as_str() == Some(field)))
+                })))
+    };
+    let field = match aggregate.field.as_deref() {
+        Some("*") if function == "COUNT" => "*",
+        Some(field) if valid_field(field) => field,
+        None if function == "COUNT" => "*",
+        _ => return None,
+    };
+    let (group_column, group_clause) = match aggregate.group_by.as_deref() {
+        Some(group) if valid_field(group) => (format!("{group}, "), format!(" GROUP BY {group} ORDER BY value DESC, {group} ASC")),
+        None => (String::new(), String::new()),
+        _ => return None,
+    };
+    Some(format!("SELECT {group_column}{function}({field}) AS value FROM artifacts{where_clause}{group_clause} LIMIT {limit}"))
+}
+
 async fn assistance(
     app: App,
     principal: Principal,
@@ -1445,7 +1490,7 @@ async fn assistance(
         let conversation = store.conversation(&cid, &owner, &workspace);
         Ok((
             conversation,
-            store.list_visible(&workspace, None, user_id.as_deref()),
+            store.snapshot_visible(&workspace, None, user_id.as_deref()),
         ))
     })
     .await?;
@@ -1480,7 +1525,7 @@ async fn assistance(
             .extend(artifact.data.keys().cloned());
     }
     for fields in schema.values_mut() {
-        fields.extend(["id", "type", "revision", "created_at", "updated_at"].map(str::to_owned));
+        fields.extend(["id", "type", "collection", "revision", "created_at", "updated_at"].map(str::to_owned));
     }
     let schema = serde_json::to_value(schema).unwrap();
     if nio::safe_json(&schema).len() > 8192 {
@@ -1518,13 +1563,32 @@ async fn assistance(
     } else {
         nio::PLAN_INSTRUCTION.to_owned()
     };
-    let plan: QueryPlan = serde_json::from_value(
-        app.nio
-            .complete(&instruction, &input)
-            .await
-            .map_err(|e| nio_error(&id, e))?,
-    )
-    .map_err(|_| nio_error(&id, nio::Failure::InvalidOutput))?;
+    let listing_plan = if chat { None } else { simple_recent_plan(&body.message, &schema) };
+    let simple_listing = listing_plan.is_some();
+    let plan: QueryPlan = if !chat {
+        if let Some(plan) = listing_plan {
+            plan
+        } else {
+            serde_json::from_value(
+                app.nio
+                    .complete(&instruction, &input)
+                    .await
+                    .map_err(|e| nio_error(&id, e))?,
+            )
+            .map_err(|_| nio_error(&id, nio::Failure::InvalidOutput))?
+        }
+    } else {
+        serde_json::from_value(
+            app.nio
+                .complete(&instruction, &input)
+                .await
+                .map_err(|e| nio_error(&id, e))?,
+        )
+        .map_err(|_| nio_error(&id, nio::Failure::InvalidOutput))?
+    };
+    let mut executed_queries: Vec<String> = Vec::new();
+    let mut all_supplied: Vec<Arc<Artifact>> = Vec::new();
+    let mut aggregate_answer = None;
     let (answer, references) = if plan.action == "clarify" {
         let question = plan
             .question
@@ -1600,15 +1664,32 @@ async fn assistance(
                 format!(" WHERE {}", clauses.join(" AND "))
             };
             let direction = if plan.latest { "DESC" } else { "ASC" };
-            let sql = format!(
+            let sql = if let Some(aggregate) = &plan.aggregate {
+                aggregate_sql(aggregate, &schema, &where_clause, plan.limit)
+                    .ok_or_else(|| nio_error(&id, nio::Failure::InvalidOutput))?
+            } else { format!(
                 "SELECT * FROM artifacts{where_clause} ORDER BY created_at {direction}, id {direction} LIMIT {}",
                 plan.limit
-            );
+            ) };
+            executed_queries.push(sql.clone());
             let query = app
                 .query
-                .execute(sql, parameters, &matches, true)
+                .execute(sql.clone(), parameters, &matches, plan.aggregate.is_none())
                 .await
                 .map_err(|e| query_error(&id, e))?;
+            if let Some(aggregate) = &plan.aggregate {
+                let items = query["items"].as_array()
+                    .ok_or_else(|| query_error(&id, query::Failure::Unavailable))?;
+                aggregate_answer = Some(if aggregate.group_by.is_some() {
+                    format!("{} by {} across all matching records (up to {} groups shown).", aggregate.function.to_uppercase(), aggregate.group_by.as_deref().unwrap(), plan.limit)
+                } else if aggregate.function.eq_ignore_ascii_case("count") && aggregate.field.is_none() {
+                    format!("There are {} matching records.", items.first().map(|row| &row["value"]).unwrap_or(&Value::Null))
+                } else {
+                    format!("{} of {} across matching records: {}.", aggregate.function.to_uppercase(), aggregate.field.as_deref().unwrap_or("records"), items.first().map(|row| &row["value"]).unwrap_or(&Value::Null))
+                });
+                query_results.push(json!({"sql":sql,"items":items}));
+                (Vec::new(), 0)
+            } else {
             let total = query["total"]
                 .as_u64()
                 .ok_or_else(|| query_error(&id, query::Failure::Unavailable))?
@@ -1625,9 +1706,11 @@ async fn assistance(
                 })
                 .collect();
             (selected, total)
+            }
         };
         let mut supplied = Vec::new();
         let mut bytes = 0;
+        let selected_count = selected.len();
         for artifact in selected {
             let size = nio::safe_json(&serde_json::to_value(&artifact).unwrap()).len();
             if bytes + size <= 10 * 1024 {
@@ -1635,22 +1718,45 @@ async fn assistance(
                 supplied.push(artifact);
             }
         }
-        let omitted = total.saturating_sub(supplied.len());
-        let input = json!({"message":body.message,"history":history,"records":supplied,"matching_count":total,"omitted_count":omitted,"caller":{"id":principal.name},"fields":body.fields,"query_results":query_results,"skill_guidance":guidance});
-        let mut answer: Answer = serde_json::from_value(
-            app.nio
-                .complete(
-                    if chat {
-                        nio::CHAT_INSTRUCTION
-                    } else {
-                        nio::ANSWER_INSTRUCTION
-                    },
-                    &input,
-                )
-                .await
-                .map_err(|e| nio_error(&id, e))?,
-        )
-        .map_err(|_| nio_error(&id, nio::Failure::InvalidOutput))?;
+        all_supplied = supplied.clone();
+        if !query_results.is_empty() {
+            for sql in query_results.iter().filter_map(|q| q["sql"].as_str()) {
+                if !executed_queries.iter().any(|query| query == sql) { executed_queries.push(sql.to_owned()); }
+            }
+        }
+        let omitted = selected_count.saturating_sub(supplied.len());
+        let input = json!({"message":body.message,"history":history,"records":supplied,"matching_count":total,"query_limit":plan.limit,"omitted_count":selected_count.saturating_sub(supplied.len()),"caller":{"id":principal.name},"fields":body.fields,"query_results":query_results,"skill_guidance":guidance});
+        let mut answer: Answer = if let Some(message) = aggregate_answer {
+            Answer { status: "answered".into(), message, references: Vec::new() }
+        } else if simple_listing {
+            Answer {
+                status: "answered".into(),
+                message: if supplied.is_empty() {
+                    "No matching records found.".into()
+                } else {
+                    format!(
+                        "Showing the {} most recent matching records of {total}.",
+                        supplied.len()
+                    )
+                },
+                references: supplied.iter().map(|artifact| artifact.id.clone()).collect(),
+            }
+        } else {
+            serde_json::from_value(
+                app.nio
+                    .complete(
+                        if chat {
+                            nio::CHAT_INSTRUCTION
+                        } else {
+                            nio::ANSWER_INSTRUCTION
+                        },
+                        &input,
+                    )
+                    .await
+                    .map_err(|e| nio_error(&id, e))?,
+            )
+            .map_err(|_| nio_error(&id, nio::Failure::InvalidOutput))?
+        };
         if !matches!(answer.status.as_str(), "answered" | "needs_clarification")
             || answer.message.trim().is_empty()
             || answer.message.len() > 8192
@@ -1668,9 +1774,9 @@ async fn assistance(
                 references.push(json!({"record_id":artifact.id,"artifact_id":artifact.id,"revision":artifact.revision}));
             }
         }
-        if omitted > 0 {
+        if omitted > 0 && !simple_listing {
             answer.message.push_str(&format!(
-                "\n\nResults are bounded: {omitted} matching records were omitted."
+                "\n\n{omitted} returned records were omitted because they exceed the answer context limit."
             ));
         }
         (answer, references)
@@ -1690,9 +1796,20 @@ async fn assistance(
         store.save_conversation(conversation)
     })
     .await?;
-    Ok(Json(
-        json!({"request_id":id.0,"conversation_id":conversation_id,"status":answer.status,"message":answer.message,"references":references}),
-    ))
+    let returned_records: Vec<_> = all_supplied.iter().map(public_value).map(record_value).collect();
+    let mut resp = json!({
+        "request_id": id.0,
+        "conversation_id": conversation_id,
+        "status": answer.status,
+        "message": answer.message,
+        "references": references,
+        "records": returned_records,
+        "queries": executed_queries,
+    });
+    if !query_results.is_empty() {
+        resp["query_results"] = json!(query_results);
+    }
+    Ok(Json(resp))
 }
 
 fn nio_error(id: &RequestId, failure: nio::Failure) -> ApiError {
@@ -1736,7 +1853,7 @@ fn query_error(id: &RequestId, failure: query::Failure) -> ApiError {
             id,
             StatusCode::BAD_REQUEST,
             "query_rejected",
-            "SQL is outside the supported read-only grammar or references unavailable fields",
+            "Couldn't run this query. Use one SELECT statement with an existing collection (or records), and check the field names.",
         ),
         query::Failure::TooLarge => error(
             id,
@@ -2203,7 +2320,7 @@ async fn mcp_handler(
                     let ws_clone = ws.clone();
                     let uid = user_id.clone();
                     let records = storage(&app, &id, move |store| {
-                        Ok(store.list_visible(&ws_clone, None, uid.as_deref()))
+                        Ok(store.snapshot_visible(&ws_clone, None, uid.as_deref()))
                     }).await?;
                     let sql_res = app.query.execute(sql.to_owned(), Vec::new(), &records, false).await;
                     match sql_res {
@@ -2770,6 +2887,24 @@ mod tests {
     use std::time::Duration;
     use tower::ServiceExt;
 
+    #[test]
+    fn recent_listing_plan_uses_all_collections_when_unspecified() {
+        let schema = json!({"telemetry": [], "customers": []});
+        let plan = simple_recent_plan("Show the most recently created 5 records", &schema).unwrap();
+        assert_eq!(plan.kind, None);
+        assert!(plan.latest);
+        assert_eq!(plan.limit, 5);
+        let plan = simple_recent_plan("Show the 5 most recent customer records", &schema).unwrap();
+        assert_eq!(plan.kind.as_deref(), Some("customers"));
+        let plan = simple_recent_plan("Show me the recent telemetry data. 10 pls.", &schema).unwrap();
+        assert_eq!(plan.kind.as_deref(), Some("telemetry"));
+        assert_eq!(plan.limit, 10);
+        assert!(simple_recent_plan("Summarize the recent records", &schema).is_none());
+        assert!(simple_recent_plan("Show recent records where status is failed", &schema).is_none());
+        assert!(simple_recent_plan("Show the 5 most recent missing_collection records", &schema).is_none());
+        assert!(simple_recent_plan("Show recent telemetry and customer records", &schema).is_none());
+    }
+
     fn app(directory: &Directory, timeout: Duration) -> App {
         let principal = |name: &str, workspace: &str| Principal {
             name: name.into(),
@@ -2795,6 +2930,69 @@ mod tests {
                 "/runtime/event-worker.cjs"
             )),
         }
+    }
+
+    #[tokio::test]
+    async fn starter_demo_is_complete_durable_and_visible() {
+        let directory = Directory::new();
+        let state = app(&directory, Duration::from_secs(2));
+        let data = directory.0.join("data");
+        let event = {
+            let mut store = state.store.lock().unwrap();
+            let event = seed_default_demo(&mut store, &data, "a", "alice", "http://127.0.0.1:7432", false).unwrap().unwrap();
+            assert_eq!(store.list("a", Some("demo")).len(), 1);
+            assert_eq!(store.users("a").len(), 1);
+            let files = store.files("a", "demo");
+            assert_eq!(files.len(), 1);
+            assert_eq!(files[0].mime, "text/plain");
+            assert!(files[0].size > 0);
+            assert_eq!(std::fs::metadata(store.blob_path(&files[0]).unwrap()).unwrap().len(), files[0].size);
+            let workers = store.event_workers();
+            assert_eq!(workers.len(), 1);
+            assert_eq!(workers[0].event_name, "demo.ping");
+            assert!(workers[0].source.contains("fetch(\"http://127.0.0.1:7432/health\""));
+            assert!(seed_default_demo(&mut store, &data, "a", "alice", "http://127.0.0.1:7432", true).unwrap().is_none());
+            store.vacuum().unwrap();
+            event
+        };
+        let login: Value = serde_json::from_slice(&std::fs::read(data.join("demo-user.json")).unwrap()).unwrap();
+        let router = router(state.clone());
+        // Other auth tests share the bounded password-work pool. Retry capacity
+        // responses without changing the production limit.
+        let mut result = request(&router, "POST", "/auth/login", None, login.clone(), None).await;
+        for _ in 0..10 {
+            if result.0 != StatusCode::TOO_MANY_REQUESTS { break; }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            result = request(&router, "POST", "/auth/login", None, login.clone(), None).await;
+        }
+        assert_eq!(result.0, StatusCode::OK, "{result:?}");
+        for path in ["/docs", "/docs/", "/guide/"] {
+            let response = router.clone().oneshot(Request::builder().uri(path).body(Body::empty()).unwrap()).await.unwrap();
+            assert_eq!(response.status(), StatusCode::PERMANENT_REDIRECT);
+            assert_eq!(response.headers()["location"], "/guide");
+        }
+        let response = router.clone().oneshot(Request::builder().uri("/guide").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let html = axum::body::to_bytes(response.into_body(), 1024*1024).await.unwrap();
+        assert!(std::str::from_utf8(&html).unwrap().contains("id=\"workers\""));
+        let response = router.oneshot(Request::builder().uri("/api/v1/events/stream?name=demo.ping").header("authorization", "Bearer alice").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let mut stream = response.into_body().into_data_stream();
+        use futures_util::StreamExt;
+        let chunk = tokio::time::timeout(Duration::from_secs(1), stream.next()).await.unwrap().unwrap().unwrap();
+        let text = std::str::from_utf8(&chunk).unwrap();
+        assert!(text.contains(event["id"].as_str().unwrap()));
+        drop(stream);
+        drop(state);
+        let mut reopened = Store::open(&data).unwrap();
+        assert_eq!(reopened.demo_event(), Some(event));
+        let record = reopened.list("a", Some("demo"))[0].clone();
+        reopened.delete("a", &record.id, None).unwrap();
+        assert!(seed_default_demo(&mut reopened, &data, "a", "alice", "http://127.0.0.1:7432", false).unwrap().is_none());
+        assert!(reopened.list("a", Some("demo")).is_empty());
+        assert_eq!(reopened.users("a").len(), 1);
+        assert_eq!(reopened.files("a", "demo").len(), 1);
+        assert_eq!(reopened.event_workers().len(), 1);
     }
 
     async fn request(
@@ -3048,6 +3246,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn event_worker_details_updates_and_recovery() {
+        let directory = Directory::new();
+        let router = router(app(&directory, Duration::from_secs(2)));
+        let source = "export default function(event: unknown) {}";
+        let (status, created) = request(&router, "POST", "/api/v1/events/workers", Some("alice"), json!({"event_name":"demo.original","source":source}), None).await;
+        assert_eq!(status, StatusCode::CREATED);
+        let path = format!("/api/v1/events/workers/{}", created["id"].as_str().unwrap());
+        let (status, detail) = request(&router, "GET", &path, Some("alice"), Value::Null, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(detail["source"], source);
+        let updated_source = "export default async function(event: unknown) { console.log(event); }";
+        let (status, updated) = request(&router, "PATCH", &path, Some("alice"), json!({"source":updated_source}), None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(updated["source"], updated_source);
+        for key in ["id", "event_name", "created_at", "created_by"] { assert_eq!(updated[key], created[key]); }
+        let (status, updated) = request(&router, "PATCH", &path, Some("alice"), json!({"event_name":"demo.updated"}), None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(updated["source"], updated_source);
+        assert_eq!(updated["event_name"], "demo.updated");
+        for body in [json!({}), json!({"source":"  "}), json!({"source":"x".repeat(32769)}), json!({"event_name":"bad name"})] {
+            assert_eq!(request(&router, "PATCH", &path, Some("alice"), body, None).await.0, StatusCode::BAD_REQUEST);
+        }
+        for method in ["GET", "PATCH"] {
+            assert_eq!(request(&router, method, "/api/v1/events/workers/missing", Some("alice"), json!({"event_name":"demo.updated"}), None).await.0, StatusCode::NOT_FOUND);
+            assert_eq!(request(&router, method, &path, None, json!({"event_name":"demo.updated"}), None).await.0, StatusCode::UNAUTHORIZED);
+        }
+        let listed = request(&router, "GET", "/api/v1/events/workers", Some("alice"), Value::Null, None).await.1;
+        assert!(listed["items"][0].get("source").is_none());
+        request(&router, "POST", "/auth/register", Some("alice"), json!({"username":"worker_test","password":"example-long-password-1"}), None).await;
+        let login = request(&router, "POST", "/auth/login", None, json!({"username":"worker_test","password":"example-long-password-1"}), None).await.1;
+        let user_token = login["access_token"].as_str().unwrap();
+        for method in ["GET", "PATCH"] {
+            assert_eq!(request(&router, method, &path, Some(user_token), json!({"event_name":"demo.updated"}), None).await.0, StatusCode::FORBIDDEN);
+        }
+        drop(router);
+        let store = Store::open(&directory.0.join("data")).unwrap();
+        let saved = store.event_worker(created["id"].as_str().unwrap()).unwrap();
+        assert_eq!(saved.source, updated_source);
+        assert_eq!(saved.event_name, "demo.updated");
+    }
+
+    #[tokio::test]
     async fn live_events_broadcast_and_registrations_redact_secrets() {
         use futures_util::StreamExt;
         let directory = Directory::new();
@@ -3295,6 +3535,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn assistance_aggregates_all_authorized_records() {
+        let directory = Directory::new();
+        let mut state = app(&directory, Duration::from_secs(2));
+        state.query = Arc::new(AlaSql::detect(PathBuf::from("node"), PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/runtime/alasql.cjs"))).await);
+        {
+            let mut store = state.store.lock().unwrap();
+            store.create("a", "tasks".into(), serde_json::from_value(json!({"cpu":10})).unwrap(), None).unwrap();
+            store.create("a", "tasks".into(), serde_json::from_value(json!({"cpu":30})).unwrap(), None).unwrap();
+            store.create("a", "files".into(), serde_json::from_value(json!({})).unwrap(), None).unwrap();
+            store.create("b", "tasks".into(), serde_json::from_value(json!({"cpu":1000})).unwrap(), None).unwrap();
+        }
+        let router = router(state);
+        for (message, value) in [("Count total records", 3), ("Average cpu", 20)] {
+            let (status, result) = request(&router, "POST", "/api/v1/assist", Some("alice"), json!({"message":message}), None).await;
+            assert_eq!(status, StatusCode::OK, "{result}");
+            assert_eq!(result["query_results"][0]["items"][0]["value"].as_f64(), Some(value as f64));
+            assert!(result["records"].as_array().unwrap().is_empty());
+            assert!(result["references"].as_array().unwrap().is_empty());
+            assert_eq!(result["queries"].as_array().unwrap().len(), 1);
+            assert!(!result["message"].as_str().unwrap().contains("omitted"));
+        }
+        let (status, result) = request(&router, "POST", "/api/v1/assist", Some("alice"), json!({"message":"Count records by collection"}), None).await;
+        assert_eq!(status, StatusCode::OK, "{result}");
+        assert_eq!(result["query_results"][0]["items"], json!([{"collection":"tasks","value":2},{"collection":"files","value":1}]));
+        assert_eq!(request(&router, "POST", "/api/v1/assist", Some("alice"), json!({"message":"Invalid aggregate"}), None).await.0, StatusCode::BAD_GATEWAY);
+    }
+
+    #[tokio::test]
     async fn assistance_owns_conversations_and_validates_citations() {
         let directory = Directory::new();
         let router = router(app(&directory, Duration::from_secs(2)));
@@ -3328,6 +3596,7 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::OK, "{answer}");
         assert_eq!(answer["references"][0]["artifact_id"], artifact["id"]);
+        assert!(!answer["message"].as_str().unwrap().contains("omitted"));
         assert_eq!(
             request(
                 &router,

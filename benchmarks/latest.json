@@ -1,0 +1,201 @@
+{
+  "measured_at": "2026-10-05T09:36:17.475Z",
+  "binary_sha256": "b89845766c55a492be1f699a4df6d018d61dee15f1830ff7acd5bdfd22d95f95",
+  "version": "1.0.1",
+  "environment": {
+    "os": "Linux 6.18.33.2-microsoft-standard-WSL2",
+    "arch": "x64",
+    "cpu": "Intel(R) Core(TM) Ultra 5 135H",
+    "logical_cpus": 18,
+    "total_memory_bytes": 7750193152,
+    "node": "v24.18.1",
+    "build": "cargo build --release --locked",
+    "filesystem": "ext4"
+  },
+  "methodology": {
+    "transport": "HTTP over loopback, full response body parsed",
+    "concurrency": 1,
+    "dataset_records": 10000,
+    "file_metadata_records": 4,
+    "collections": {
+      "telemetry": 5000,
+      "customers": 3000,
+      "ai_memories": 2000
+    },
+    "vector_dimensions": 8,
+    "batch_size": 500,
+    "random_seed": 42,
+    "warmups": {
+      "lookups": 20,
+      "scans": 5,
+      "vectors": 5,
+      "sql": 3
+    },
+    "sql_queries": [
+      "SELECT plan, COUNT(*) AS user_count, AVG(credits) AS avg_credits FROM customers GROUP BY plan",
+      "SELECT service, AVG(latency_ms) AS avg_latency FROM telemetry WHERE status = 'ok' GROUP BY service",
+      "SELECT name, email, credits FROM customers ORDER BY credits DESC LIMIT 5"
+    ],
+    "demos": false,
+    "llm_included": false,
+    "event_handlers": 0
+  },
+  "ingestion": {
+    "total_ms": 751.235899,
+    "records_per_second": 13311.3979421263,
+    "batch_latency": {
+      "samples": 20,
+      "mean_ms": 37.538505099999995,
+      "p50_ms": 37.624341999999956,
+      "p95_ms": 39.021048000000064,
+      "p99_ms": 41.305654000000004,
+      "max_ms": 41.305654000000004
+    }
+  },
+  "latency": {
+    "point_lookup": {
+      "samples": 1000,
+      "mean_ms": 1.9468810009999926,
+      "p50_ms": 1.9205500000000484,
+      "p95_ms": 2.4059709999999086,
+      "p99_ms": 2.8864480000002004,
+      "max_ms": 6.915171999999984
+    },
+    "collection_scan": {
+      "samples": 100,
+      "mean_ms": 4.260121370000015,
+      "p50_ms": 4.149269999999888,
+      "p95_ms": 4.9742370000003575,
+      "p99_ms": 5.243038999999953,
+      "max_ms": 5.362896000000092
+    },
+    "vector_search": {
+      "samples": 100,
+      "mean_ms": 3.3384385800000063,
+      "p50_ms": 3.331308999999692,
+      "p95_ms": 4.024351999999908,
+      "p99_ms": 4.393795000000409,
+      "max_ms": 4.412101999999777
+    },
+    "sql": {
+      "samples": 30,
+      "mean_ms": 31.510541133333298,
+      "p50_ms": 31.40691700000025,
+      "p95_ms": 33.72127899999941,
+      "p99_ms": 33.733000999999604,
+      "max_ms": 33.733000999999604
+    },
+    "event_publish": {
+      "samples": 50,
+      "mean_ms": 2.123914080000002,
+      "p50_ms": 2.145231000000024,
+      "p95_ms": 2.635881999999981,
+      "p99_ms": 3.1509419999999864,
+      "max_ms": 3.1509419999999864
+    }
+  },
+  "storage": {
+    "total_bytes": 8415882,
+    "journal_bytes": 4725170,
+    "file_payload_bytes": 65746,
+    "server_rss_bytes": 40120320,
+    "memory_stages": [
+      {
+        "stage": "startup",
+        "rust_rss_bytes": 8400896,
+        "rust_peak_rss_bytes": 8400896,
+        "sql_worker_count": 1,
+        "sql_workers_rss_bytes": 84713472,
+        "combined_rss_bytes": 93114368,
+        "rust_pss_bytes": 5722112,
+        "sql_workers_pss_bytes": 51457024,
+        "combined_pss_bytes": 57179136
+      },
+      {
+        "stage": "after_files",
+        "rust_rss_bytes": 8974336,
+        "rust_peak_rss_bytes": 8974336,
+        "sql_worker_count": 1,
+        "sql_workers_rss_bytes": 84713472,
+        "combined_rss_bytes": 93687808,
+        "rust_pss_bytes": 6309888,
+        "sql_workers_pss_bytes": 50531328,
+        "combined_pss_bytes": 56841216
+      },
+      {
+        "stage": "after_ingestion",
+        "rust_rss_bytes": 27131904,
+        "rust_peak_rss_bytes": 27697152,
+        "sql_worker_count": 1,
+        "sql_workers_rss_bytes": 84713472,
+        "combined_rss_bytes": 111845376,
+        "rust_pss_bytes": 24467456,
+        "sql_workers_pss_bytes": 50388992,
+        "combined_pss_bytes": 74856448
+      },
+      {
+        "stage": "after_lookups",
+        "rust_rss_bytes": 27131904,
+        "rust_peak_rss_bytes": 27697152,
+        "sql_worker_count": 1,
+        "sql_workers_rss_bytes": 84713472,
+        "combined_rss_bytes": 111845376,
+        "rust_pss_bytes": 24467456,
+        "sql_workers_pss_bytes": 50388992,
+        "combined_pss_bytes": 74856448
+      },
+      {
+        "stage": "after_scans",
+        "rust_rss_bytes": 27131904,
+        "rust_peak_rss_bytes": 27697152,
+        "sql_worker_count": 1,
+        "sql_workers_rss_bytes": 84713472,
+        "combined_rss_bytes": 111845376,
+        "rust_pss_bytes": 24467456,
+        "sql_workers_pss_bytes": 50388992,
+        "combined_pss_bytes": 74856448
+      },
+      {
+        "stage": "after_vectors",
+        "rust_rss_bytes": 27131904,
+        "rust_peak_rss_bytes": 27697152,
+        "sql_worker_count": 1,
+        "sql_workers_rss_bytes": 84713472,
+        "combined_rss_bytes": 111845376,
+        "rust_pss_bytes": 24467456,
+        "sql_workers_pss_bytes": 50388992,
+        "combined_pss_bytes": 74856448
+      },
+      {
+        "stage": "after_sql",
+        "rust_rss_bytes": 40120320,
+        "rust_peak_rss_bytes": 40120320,
+        "sql_worker_count": 1,
+        "sql_workers_rss_bytes": 104845312,
+        "combined_rss_bytes": 144965632,
+        "rust_pss_bytes": 37455872,
+        "sql_workers_pss_bytes": 69709824,
+        "combined_pss_bytes": 107165696
+      },
+      {
+        "stage": "idle_2s",
+        "rust_rss_bytes": 40120320,
+        "rust_peak_rss_bytes": 40120320,
+        "sql_worker_count": 1,
+        "sql_workers_rss_bytes": 98349056,
+        "combined_rss_bytes": 138469376,
+        "rust_pss_bytes": 37455872,
+        "sql_workers_pss_bytes": 63213568,
+        "combined_pss_bytes": 100669440
+      }
+    ],
+    "rss_note": "Stage snapshots include Rust and direct SQL child processes; peak applies to Rust only"
+  },
+  "verification": {
+    "unauthenticated_status": 401,
+    "file_sha256_verified": 4,
+    "inserted_records": 10000,
+    "query_results_checked": true,
+    "failures": 0
+  }
+}

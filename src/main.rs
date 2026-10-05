@@ -25,7 +25,7 @@ async fn main() {
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = env::args().skip(1).peekable();
-    let mut data = PathBuf::from(env::var_os("NIODB_DIR").unwrap_or_else(|| "niodb".into()));
+    let mut data = PathBuf::from(env::var_os("NIODB_DIR").unwrap_or_else(|| "nio-db".into()));
     let mut listen: SocketAddr = env::var("NIODB_LISTEN")
         .unwrap_or_else(|_| "127.0.0.1:7432".into())
         .parse()?;
@@ -37,6 +37,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut add_secret = false;
     let mut backup = false;
     let mut include_files = false;
+    let mut seed_demo = env::var("NIODB_SEED_DEMO").as_deref() == Ok("1");
+    let mut no_demo = env::var("NIODB_NO_DEMO").as_deref() == Ok("1");
     let mut output = None;
     let mut node = PathBuf::from(env::var_os("NIODB_NODE_BIN").unwrap_or_else(|| "node".into()));
     let mut helper = PathBuf::from(
@@ -51,7 +53,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         match arg.as_str() {
             "--help" | "-h" => {
                 println!(
-                    "NioDB — The Agentic DB that works.\nA lightweight database with natural-language queries, powered by Nio.\n\nUsage: nio-db [serve|init-auth|add-secret|backup] [OPTIONS]\n\n  --dir PATH             Server data directory (default: niodb)\n  --listen IP:PORT       Listen address (default: 127.0.0.1:7432)\n  --auth-file PATH       Hashed bearer credentials (default: DIR/auth.json)\n  --nio-bin PATH         Nio CLI executable (default: nio on PATH)\n  --nio-timeout SECONDS  Timeout per Nio invocation (default: 60)\n  --node-bin PATH        Node executable for AlaSQL (default: node on PATH)\n  --alasql-helper PATH   AlaSQL helper script\n  --name NAME            Principal name for init-auth (default: nio)\n  --skill NAME           Nio skill grant for init-auth; repeatable\n  --plugin NAME          Nio plugin discovery grant; repeatable\n  --output PATH          New backup destination; stop the server before backup\n  --include-files        Back up journal and blobs into a new directory\n  --version              Print version\n\ninit-auth creates client and secret bearer tokens and prints both once.\nadd-secret adds or rotates the secret token; save its output privately.\nThe server invokes Nio for read-only natural-language assistance."
+                    "NioDB — The Agentic DB that works.\nA lightweight database with natural-language queries, powered by Nio.\n\nUsage: nio-db [serve|init-auth|add-secret|backup] [OPTIONS]\n\n  --dir PATH             Server data directory (default: nio-db)\n  --listen IP:PORT       Listen address (default: 127.0.0.1:7432)\n  --auth-file PATH       Hashed bearer credentials (default: DIR/auth.json)\n  --nio-bin PATH         Nio CLI executable (default: nio on PATH)\n  --nio-timeout SECONDS  Timeout per Nio invocation (default: 60)\n  --node-bin PATH        Node executable for AlaSQL (default: node on PATH)\n  --alasql-helper PATH   AlaSQL helper script\n  --name NAME            Principal name for init-auth (default: nio)\n  --skill NAME           Nio skill grant for init-auth; repeatable\n  --plugin NAME          Nio plugin discovery grant; repeatable\n  --output PATH          New backup destination; stop the server before backup\n  --include-files        Back up journal and blobs into a new directory\n  --seed-demo            Add starter examples to an existing database once\n  --no-demo              Skip starter examples on first launch\n  --version              Print version\n\ninit-auth creates client and secret bearer tokens and prints both once.\nadd-secret adds or rotates the secret token; save its output privately.\nThe server invokes Nio for read-only natural-language assistance."
                 );
                 return Ok(());
             }
@@ -64,6 +66,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             "add-secret" => add_secret = true,
             "backup" => backup = true,
             "--include-files" => include_files = true,
+            "--seed-demo" => seed_demo = true,
+            "--no-demo" => no_demo = true,
             "--output" => {
                 output = Some(PathBuf::from(
                     args.next().ok_or("--output requires a path")?,
@@ -98,6 +102,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     if !(1..=300).contains(&timeout) {
         return Err("--nio-timeout must be between 1 and 300 seconds".into());
+    }
+    if seed_demo && no_demo {
+        return Err("choose --seed-demo or --no-demo".into());
     }
     let auth_file = auth_file.unwrap_or_else(|| data.join("auth.json"));
     if [init, add_secret, backup]
@@ -152,7 +159,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     if scopes.len() != 1 {
         return Err("NioDB uses one workspace per server. Configure credentials for one existing workspace; stored data is not modified.".into());
     }
-    let store = Store::open(&data)?;
+    let mut store = Store::open(&data)?;
     if let Some(scope) = store.single_workspace()? {
         for principal in &mut principals {
             principal.workspaces = vec![scope.clone()];
@@ -178,16 +185,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         Duration::from_secs(timeout),
     )
     .await?;
-    let app = App {
-        store: Arc::new(Mutex::new(store)),
-        principals: Arc::new(principals),
-        nio: Arc::new(nio),
-        query: Arc::new(query),
-        conversations: Arc::new(Mutex::new(BTreeSet::new())),
-        events: tokio::sync::broadcast::channel(256).0,
-        node_binary: node,
-        worker_runner,
-    };
     let listener = tokio::net::TcpListener::bind(listen).await.map_err(|error| {
         if error.kind() == std::io::ErrorKind::AddrInUse {
             std::io::Error::new(error.kind(), format!("Port {} is already in use. Stop the other server, or choose another port with --listen 127.0.0.1:7433.", listen.port()))
@@ -204,7 +201,23 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
     let url = format!("http://{address}");
+    let demo_event = if no_demo { None } else {
+        api::seed_default_demo(&mut store, &data, &principals[0].workspaces[0], &principals[0].name, &url, seed_demo)?
+    };
+    let app = App {
+        store: Arc::new(Mutex::new(store)),
+        principals: Arc::new(principals),
+        nio: Arc::new(nio),
+        query: Arc::new(query),
+        conversations: Arc::new(Mutex::new(BTreeSet::new())),
+        events: tokio::sync::broadcast::channel(256).0,
+        node_binary: node,
+        worker_runner,
+    };
     startup_banner(&app, &url, &data, &auth_file);
+    if let Some(event) = demo_event {
+        api::dispatch_demo_event(app.clone(), event);
+    }
     axum::serve(listener, api::router(app))
         .with_graceful_shutdown(shutdown())
         .await?;
@@ -261,13 +274,17 @@ fn startup_banner(app: &App, url: &str, data: &std::path::Path, auth_file: &std:
     );
     eprintln!("  Console    {}", terminal_url(&format!("{url}/console")));
     eprintln!("  API docs   {}", terminal_url(&format!("{url}/doc")));
-    eprintln!("  Guides     {}", terminal_url(&format!("{url}/docs/")));
+    eprintln!("  Guides     {}", terminal_url(&format!("{url}/guide")));
     eprintln!("  Server     {}", terminal_url(url));
     eprintln!(
         "  OpenAPI    {}\n",
         terminal_url(&format!("{url}/openapi.yaml"))
     );
     eprintln!("  Data       {}", terminal_path(data));
+    let demo_login = data.join("demo-user.json");
+    if demo_login.is_file() {
+        eprintln!("  Demo login {}", terminal_path(&demo_login));
+    }
     let client_token = data.join("client-token");
     let secret_token = data.join("secret-token");
     if auth_file == data.join("auth.json") && client_token.is_file() {

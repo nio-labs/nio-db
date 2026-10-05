@@ -16,12 +16,12 @@ servers:
 security:
 - bearerAuth: []
 paths:
-  /docs/:
+  /guide:
     get:
       operationId: getGuides
       summary: Open NioDB guides
       description: Self-contained documentation for setup, authentication, queries,
-        files, chat and events. /docs redirects here.
+        files, chat, events and TypeScript workers. /docs and /docs/ redirect here.
       security: []
       responses:
         '200':
@@ -1023,6 +1023,62 @@ paths:
       required: true
       schema:
         type: string
+    get:
+      operationId: getEventWorker
+      tags: [Events]
+      summary: Get event worker details and source
+      description: Backend credential only.
+      responses:
+        '200':
+          description: Worker details
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/EventWorker'
+                - type: object
+                  required: [source]
+                  properties:
+                    source:
+                      type: string
+        default:
+          $ref: '#/components/responses/Error'
+    patch:
+      operationId: updateEventWorker
+      tags: [Events]
+      summary: Update an event worker's event name or source
+      description: Backend credential only. Updates preserve the worker ID and creation metadata. The updated source is used for subsequent events.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              minProperties: 1
+              properties:
+                event_name:
+                  type: string
+                  description: Exact event name or '*'.
+                source:
+                  type: string
+                  minLength: 1
+                  maxLength: 32768
+      responses:
+        '200':
+          description: Updated worker details including source
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/EventWorker'
+                - type: object
+                  required: [source]
+                  properties:
+                    source:
+                      type: string
+        default:
+          $ref: '#/components/responses/Error'
     delete:
       operationId: deleteEventWorker
       tags:

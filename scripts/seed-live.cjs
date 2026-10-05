@@ -2,9 +2,11 @@
 
 const { readFileSync } = require('node:fs');
 const { randomBytes } = require('node:crypto');
+const { resolve, join } = require('node:path');
 
-const BASE_URL = 'http://127.0.0.1:7432';
-const TOKEN = readFileSync('/home/mn/nio-labs/niodb/client-token', 'utf8').trim();
+const BASE_URL = process.env.NIODB_BASE_URL || 'http://127.0.0.1:7432';
+const DATA_DIR = process.env.NIODB_DATA_DIR || resolve(__dirname, '../nio-db');
+const TOKEN = readFileSync(join(DATA_DIR, 'client-token'), 'utf8').trim();
 const AUTH = { Authorization: `Bearer ${TOKEN}` };
 
 const TOTAL_RECORDS = 10000;
@@ -20,13 +22,16 @@ async function request(path, options = {}) {
   } else {
     body = await res.text();
   }
+  if (!res.ok) {
+    throw new Error(`${path} failed with status ${res.status}: ${JSON.stringify(body)}`);
+  }
   return { status: res.status, headers: res.headers, body };
 }
 
 async function main() {
   console.log('='.repeat(70));
   console.log(`Seeding NioDB Live Server at ${BASE_URL}`);
-  console.log(`Database Directory: /home/mn/nio-labs/niodb`);
+  console.log(`Database Directory: ${DATA_DIR}`);
   console.log('='.repeat(70));
 
   // 1. Files / Storage

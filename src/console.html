@@ -132,14 +132,14 @@
 <body class="h-screen w-screen overflow-hidden flex flex-col antialiased">
   <div id="app" v-cloak class="h-full w-full flex overflow-hidden">
     <!-- SHADCN SIDEBAR -->
-    <aside class="w-56 border-r border-border bg-card flex flex-col flex-shrink-0 z-20">
+    <aside class="w-60 border-r border-border bg-card flex flex-col flex-shrink-0 z-20">
       <!-- Brand Logo -->
-      <div class="h-12 px-4 border-b border-border flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <div class="w-6 h-6 rounded-md bg-primary flex items-center justify-center text-primary-foreground font-bold text-[11px] shadow-sm">
+      <div class="h-14 px-4 border-b border-border flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground font-bold text-[11px] shadow-sm">
             N
           </div>
-          <span class="font-semibold text-xs tracking-tight text-foreground">NioDB</span>
+          <span class="font-semibold text-sm tracking-tight text-foreground">NioDB</span>
           <span class="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-primary/10 text-primary border border-primary/20">
             CONSOLE
           </span>
@@ -147,76 +147,76 @@
       </div>
 
       <!-- Navigation Links -->
-      <nav class="flex-1 px-2.5 py-3 space-y-0.5 overflow-y-auto">
+      <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
         <button 
           @click="activeNav = 'data'" 
           :class="[
-            'w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all text-left',
+            'w-full min-h-10 flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left',
             activeNav === 'data' 
               ? 'bg-teal-500/15 text-teal-800 dark:text-teal-200 font-semibold shadow-sm' 
               : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
           ]"
         >
-          <icon name="database" class="w-3.5 h-3.5 text-teal-600 dark:text-teal-400"></icon>
+          <icon name="database" class="w-4 h-4 text-teal-600 dark:text-teal-400"></icon>
           <span>Data & Query</span>
         </button>
 
         <button 
           @click="activeNav = 'files'" 
           :class="[
-            'w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all text-left',
+            'w-full min-h-10 flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left',
             activeNav === 'files' 
               ? 'bg-teal-500/15 text-teal-800 dark:text-teal-200 font-semibold shadow-sm' 
               : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
           ]"
         >
-          <icon name="folder" class="w-3.5 h-3.5 text-teal-600 dark:text-teal-400"></icon>
+          <icon name="folder" class="w-4 h-4 text-teal-600 dark:text-teal-400"></icon>
           <span>Files & Storage</span>
         </button>
 
         <button 
           @click="activeNav = 'events'" 
           :class="[
-            'w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all text-left',
+            'w-full min-h-10 flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left',
             activeNav === 'events' 
               ? 'bg-teal-500/15 text-teal-800 dark:text-teal-200 font-semibold shadow-sm' 
               : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
           ]"
         >
-          <icon name="zap" class="w-3.5 h-3.5 text-teal-600 dark:text-teal-400"></icon>
+          <icon name="zap" class="w-4 h-4 text-teal-600 dark:text-teal-400"></icon>
           <span>Events & Webhook</span>
         </button>
 
         <button 
           @click="activeNav = 'auth'" 
           :class="[
-            'w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all text-left',
+            'w-full min-h-10 flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left',
             activeNav === 'auth' 
               ? 'bg-teal-500/15 text-teal-800 dark:text-teal-200 font-semibold shadow-sm' 
               : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
           ]"
         >
-          <icon name="users" class="w-3.5 h-3.5 text-teal-600 dark:text-teal-400"></icon>
+          <icon name="users" class="w-4 h-4 text-teal-600 dark:text-teal-400"></icon>
           <span>Auth & Users</span>
         </button>
 
         <button 
           @click="activeNav = 'settings'" 
           :class="[
-            'w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all text-left',
+            'w-full min-h-10 flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left',
             activeNav === 'settings' 
               ? 'bg-teal-500/15 text-teal-800 dark:text-teal-200 font-semibold shadow-sm' 
               : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
           ]"
         >
-          <icon name="settings" class="w-3.5 h-3.5 text-teal-600 dark:text-teal-400"></icon>
+          <icon name="settings" class="w-4 h-4 text-teal-600 dark:text-teal-400"></icon>
           <span>Config & Status</span>
         </button>
       </nav>
 
       <!-- Sidebar Footer -->
-      <div class="p-2.5 border-t border-border flex flex-col gap-1.5 bg-card">
-        <div class="flex items-center justify-between text-[11px] px-1.5 py-0.5 text-muted-foreground">
+      <div class="p-3 border-t border-border flex flex-col gap-2 bg-card">
+        <div class="flex items-center justify-between text-[11px] px-1 py-1 text-muted-foreground">
           <div class="flex items-center gap-1.5">
             <span class="relative flex h-1.5 w-1.5">
               <span v-if="serverOnline" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75"></span>
@@ -227,11 +227,11 @@
           <span class="text-[10px] font-mono text-muted-foreground">{{ serverVersion }}</span>
         </div>
 
-        <div class="flex items-center justify-between text-[11px] px-1.5 pt-1 border-t border-border/50 text-muted-foreground">
+        <div class="flex items-center justify-between text-[11px] px-1 pt-2 border-t border-border/50 text-muted-foreground">
           <a href="/doc" target="_blank" class="hover:text-primary transition-colors flex items-center gap-1">
             <icon name="file-code" class="w-3 h-3"></icon> API Docs
           </a>
-          <a href="/docs/" target="_blank" class="hover:text-primary transition-colors flex items-center gap-1">
+          <a href="/guide" target="_blank" class="hover:text-primary transition-colors flex items-center gap-1">
             <icon name="book-open" class="w-3 h-3"></icon> Guides
           </a>
         </div>
@@ -241,7 +241,7 @@
     <!-- MAIN WRAPPER -->
     <div class="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-background">
       <!-- SHADCN TOP HEADER -->
-      <header class="h-12 border-b border-border bg-card/70 backdrop-blur px-5 flex items-center justify-between flex-shrink-0 z-10">
+      <header class="h-14 border-b border-border bg-card/70 backdrop-blur px-5 flex items-center justify-between flex-shrink-0 z-10">
         <div class="flex items-center gap-2.5">
           <h2 class="text-xs font-semibold tracking-tight text-foreground">
             {{ navTitles[activeNav] }}
@@ -351,9 +351,9 @@
           </div>
 
           <!-- TAB A: RECORDS DATA GRID -->
-          <div v-if="activeDataTab === 'browser'" class="rounded-lg border border-border bg-card shadow-sm overflow-hidden flex flex-col">
+          <div v-if="activeDataTab === 'browser'" class="rounded-lg border border-border bg-card shadow-sm flex flex-col">
             <!-- Grid Toolbar -->
-            <div class="p-2.5 border-b border-border bg-muted/40 flex flex-wrap items-center justify-between gap-2">
+            <div class="relative z-20 p-2.5 border-b border-border bg-muted/40 flex flex-wrap items-center justify-between gap-2 rounded-t-lg">
               <div class="flex items-center gap-2 flex-1 min-w-[260px]">
                 <div class="relative w-56">
                   <icon name="search" class="w-3 h-3 absolute left-2.5 top-2 text-muted-foreground"></icon>
@@ -367,8 +367,10 @@
 
                 <div class="relative w-40" id="collection-filter-combobox">
                   <button 
-                    @click.stop="collectionDropdownOpen = !collectionDropdownOpen; vectorDropdownOpen = false"
+                    @click.stop="toggleCollectionDropdown()"
                     type="button"
+                    aria-label="Filter by collection"
+                    :aria-expanded="collectionDropdownOpen"
                     class="flex h-7 w-full items-center justify-between rounded-md border border-input bg-background px-2.5 text-[11px] shadow-sm hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground transition-colors"
                   >
                     <span class="truncate">{{ collectionFilter || 'All Collections' }}</span>
@@ -376,30 +378,46 @@
                   </button>
                   <div 
                     v-if="collectionDropdownOpen" 
-                    class="absolute top-full left-0 mt-1 w-full max-h-52 overflow-y-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md z-50 animate-in fade-in-0 zoom-in-95"
+                    class="absolute top-full left-0 mt-1 w-52 rounded-md border border-border bg-popover text-popover-foreground shadow-md z-50 animate-in fade-in-0 zoom-in-95"
                   >
-                    <button 
-                      type="button"
-                      @click="selectCollectionFilter('')"
-                      class="relative flex w-full cursor-pointer select-none items-center rounded-sm py-1 pl-6 pr-2 text-[11px] outline-none hover:bg-accent hover:text-accent-foreground text-left"
-                    >
-                      <span v-if="!collectionFilter" class="absolute left-1.5 flex h-3.5 w-3.5 items-center justify-center">
-                        <icon name="check" class="w-3 h-3 text-teal-600 dark:text-teal-400"></icon>
-                      </span>
-                      <span :class="{'font-medium': !collectionFilter}">All Collections</span>
-                    </button>
-                    <button 
-                      v-for="c in collectionsList" 
-                      :key="c"
-                      type="button"
-                      @click="selectCollectionFilter(c)"
-                      class="relative flex w-full cursor-pointer select-none items-center rounded-sm py-1 pl-6 pr-2 text-[11px] outline-none hover:bg-accent hover:text-accent-foreground text-left truncate"
-                    >
-                      <span v-if="collectionFilter === c" class="absolute left-1.5 flex h-3.5 w-3.5 items-center justify-center">
-                        <icon name="check" class="w-3 h-3 text-teal-600 dark:text-teal-400"></icon>
-                      </span>
-                      <span :class="{'font-medium': collectionFilter === c}">{{ c }}</span>
-                    </button>
+                    <div class="relative p-1.5 border-b border-border">
+                      <icon name="search" class="w-3 h-3 absolute left-3.5 top-3 text-muted-foreground"></icon>
+                      <input
+                        id="collection-search-input"
+                        v-model="collectionSearch"
+                        @keydown.esc="collectionDropdownOpen = false"
+                        type="search"
+                        aria-label="Search collections"
+                        placeholder="Search collections..."
+                        class="h-7 w-full rounded border border-input bg-background pl-7 pr-2 text-[11px] placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      />
+                    </div>
+                    <div class="max-h-52 overflow-y-auto p-1">
+                      <button
+                        v-if="!collectionSearch || 'all collections'.includes(collectionSearch.trim().toLowerCase())"
+                        type="button"
+                        @click="selectCollectionFilter('')"
+                        class="relative flex w-full cursor-pointer select-none items-center rounded-sm py-1 pl-6 pr-2 text-[11px] outline-none hover:bg-accent hover:text-accent-foreground text-left"
+                      >
+                        <span v-if="!collectionFilter" class="absolute left-1.5 flex h-3.5 w-3.5 items-center justify-center">
+                          <icon name="check" class="w-3 h-3 text-teal-600 dark:text-teal-400"></icon>
+                        </span>
+                        <span :class="{'font-medium': !collectionFilter}">All Collections</span>
+                      </button>
+                      <button
+                        v-for="c in matchingCollections"
+                        :key="c"
+                        type="button"
+                        @click="selectCollectionFilter(c)"
+                        class="relative flex w-full cursor-pointer select-none items-center rounded-sm py-1 pl-6 pr-2 text-[11px] outline-none hover:bg-accent hover:text-accent-foreground text-left truncate"
+                      >
+                        <span v-if="collectionFilter === c" class="absolute left-1.5 flex h-3.5 w-3.5 items-center justify-center">
+                          <icon name="check" class="w-3 h-3 text-teal-600 dark:text-teal-400"></icon>
+                        </span>
+                        <span :class="{'font-medium': collectionFilter === c}">{{ c }}</span>
+                      </button>
+                      <div v-if="matchingCollections.length === 0 && collectionSearch && !'all collections'.includes(collectionSearch.trim().toLowerCase())" class="px-2 py-2 text-[11px] text-muted-foreground">No collections found</div>
+                    </div>
                   </div>
                 </div>
 
@@ -506,7 +524,7 @@
             </div>
 
             <!-- Grid Pagination Footer -->
-            <div class="py-2.5 px-3 border-t border-border bg-muted/30 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
+            <div class="py-2.5 px-3 border-t border-border bg-muted/30 rounded-b-lg flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
               <div class="flex items-center gap-2">
                 <span v-if="searchFilter">
                   Showing <span class="font-medium text-foreground">{{ filteredRecords.length }}</span> matches on page {{ currentPage }} (total {{ totalRecords.toLocaleString() }})
@@ -624,6 +642,7 @@
                   v-model="sqlQuery"
                   @keydown.ctrl.enter="executeSql()"
                   @keydown.meta.enter="executeSql()"
+                  @keydown="handleSqlEditorKeydown($event)"
                   rows="4" 
                   class="flex w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-mono shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
                   placeholder="SELECT * FROM records LIMIT 25;"
@@ -631,7 +650,7 @@
               </div>
 
               <div class="flex items-center justify-between text-[11px] text-muted-foreground pt-0.5">
-                <span>Press <kbd class="px-1.5 py-0.5 rounded bg-muted font-mono border border-border text-[10px]">Ctrl+Enter</kbd> to run</span>
+                <span>Press <kbd class="px-1.5 py-0.5 rounded bg-muted font-mono border border-border text-[10px]">Ctrl/⌘+Enter</kbd> to run · <kbd class="px-1.5 py-0.5 rounded bg-muted font-mono border border-border text-[10px]">Ctrl/⌘+/</kbd> to comment lines</span>
                 <button 
                   @click="executeSql()" 
                   :disabled="sqlLoading"
@@ -714,6 +733,12 @@
               <div class="flex items-center gap-1.5 pt-0.5 flex-wrap">
                 <span class="text-[11px] text-muted-foreground">Try asking:</span>
                 <button 
+                  @click="humanPrompt = 'Show me the recent telemetry data. 10 pls.'; askHuman();"
+                  class="text-[11px] px-2 py-0.5 rounded-full border border-border bg-secondary hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  "Show me the recent telemetry data. 10 pls."
+                </button>
+                <button
                   @click="humanPrompt = 'Count total records and group by collection'; askHuman();"
                   class="text-[11px] px-2 py-0.5 rounded-full border border-border bg-secondary hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
                 >
@@ -729,23 +754,110 @@
             </div>
 
             <!-- Human Answer Card -->
-            <div v-if="humanAnswer || humanQueries.length > 0 || humanError" class="rounded-lg border border-border bg-card p-4 shadow-sm space-y-2.5">
-              <h4 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Answer</h4>
+            <div v-if="humanAnswer || humanQueries.length > 0 || humanRecords.length > 0 || humanTableResults.length > 0 || humanError" class="rounded-lg border border-border bg-card p-4 shadow-sm space-y-3">
+              <h4 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <icon name="bot" class="w-3.5 h-3.5 text-teal-600 dark:text-teal-400"></icon>
+                Nio Answer
+                <span v-if="humanElapsed !== null" class="ml-auto font-normal normal-case tracking-normal" title="Total request time">
+                  {{ formatDuration(humanElapsed) }}
+                </span>
+              </h4>
               
               <div v-if="humanError" class="text-[11px] text-destructive bg-destructive/10 p-2.5 rounded-md font-mono">
                 {{ humanError }}
               </div>
               
-              <div v-if="humanAnswer" class="text-xs leading-relaxed text-foreground whitespace-pre-wrap">
+              <div v-if="humanAnswer" class="text-xs leading-relaxed text-foreground whitespace-pre-wrap bg-muted/20 p-3 rounded-md border border-border font-sans">
                 {{ humanAnswer }}
               </div>
 
-              <div v-if="humanQueries.length > 0" class="pt-2.5 border-t border-border space-y-1.5">
+              <!-- Executed Query -->
+              <div v-if="humanQueries.length > 0" class="pt-2 border-t border-border space-y-1.5">
                 <div class="text-[11px] font-semibold text-primary flex items-center gap-1">
-                  <icon name="code" class="w-3 h-3"></icon> Generated Read Queries:
+                  <icon name="code" class="w-3 h-3"></icon> Executed Query:
                 </div>
-                <div class="bg-muted/40 p-2.5 rounded-md border border-border font-mono text-[11px] text-muted-foreground space-y-1">
+                <div class="bg-muted/40 p-2.5 rounded-md border border-border font-mono text-[11px] text-muted-foreground space-y-1 overflow-x-auto">
                   <div v-for="(q, i) in humanQueries" :key="i">{{ q }}</div>
+                </div>
+              </div>
+
+              <!-- Grounded Records Table/List -->
+              <div v-if="humanRecords.length > 0" class="pt-2 border-t border-border space-y-2">
+                <div class="flex items-center justify-between">
+                  <div class="text-[11px] font-semibold text-foreground flex items-center gap-1.5">
+                    <icon name="database" class="w-3.5 h-3.5 text-teal-600 dark:text-teal-400"></icon>
+                    Grounded Records ({{ humanRecords.length }} returned)
+                  </div>
+                </div>
+
+                <div class="rounded-md border border-border overflow-hidden">
+                  <div class="overflow-x-auto max-h-[380px]">
+                    <table class="w-full text-left text-xs border-collapse">
+                      <thead class="bg-muted/50 sticky top-0 border-b border-border text-[11px] text-muted-foreground">
+                        <tr>
+                          <th class="py-2 px-3 font-medium">Record ID</th>
+                          <th class="py-2 px-3 font-medium">Collection</th>
+                          <th class="py-2 px-3 font-medium">Data Preview</th>
+                          <th class="py-2 px-3 font-medium">Created At</th>
+                          <th class="py-2 px-3 font-medium text-right">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody class="divide-y divide-border">
+                        <tr v-for="r in humanRecords" :key="r.id" class="hover:bg-muted/20 transition-colors">
+                          <td class="py-2 px-3 font-mono text-[11px] text-foreground font-medium whitespace-nowrap">
+                            {{ r.id }}
+                          </td>
+                          <td class="py-2 px-3 whitespace-nowrap">
+                            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-secondary text-secondary-foreground border border-border">
+                              {{ r.collection || r.type }}
+                            </span>
+                          </td>
+                          <td class="py-2 px-3 text-[11px] font-mono text-muted-foreground truncate max-w-md">
+                            {{ JSON.stringify(r.data) }}
+                          </td>
+                          <td class="py-2 px-3 font-mono text-[10px] text-muted-foreground whitespace-nowrap">
+                            {{ r.created_at ? r.created_at.slice(0, 19).replace('T', ' ') : '—' }}
+                          </td>
+                          <td class="py-2 px-3 text-right whitespace-nowrap">
+                            <button
+                              @click="viewRecordDetail(r)"
+                              class="text-[10px] px-2.5 py-1 rounded border border-border hover:bg-accent text-foreground transition-colors font-medium"
+                            >
+                              Inspect
+                            </button>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Aggregate / Table Results (e.g. from COUNT / GROUP queries) -->
+              <div v-if="humanTableResults.length > 0" class="pt-2 border-t border-border space-y-2">
+                <div class="text-[11px] font-semibold text-foreground flex items-center gap-1.5">
+                  <icon name="table" class="w-3.5 h-3.5 text-teal-600 dark:text-teal-400"></icon>
+                  Aggregated Query Results ({{ humanTableResults.length }} rows)
+                </div>
+                <div class="rounded-md border border-border overflow-hidden">
+                  <div class="overflow-x-auto max-h-[280px]">
+                    <table class="w-full text-left text-xs border-collapse">
+                      <thead class="bg-muted/50 sticky top-0 border-b border-border text-[11px] text-muted-foreground">
+                        <tr>
+                          <th v-for="col in Object.keys(humanTableResults[0])" :key="col" class="py-2 px-3 font-medium uppercase text-[10px]">
+                            {{ col }}
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody class="divide-y divide-border">
+                        <tr v-for="(row, idx) in humanTableResults" :key="idx" class="hover:bg-muted/20 transition-colors">
+                          <td v-for="col in Object.keys(humanTableResults[0])" :key="col" class="py-2 px-3 font-mono text-[11px] text-foreground">
+                            {{ typeof row[col] === 'number' ? row[col].toLocaleString() : row[col] }}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1193,10 +1305,10 @@
                       <icon name="file" class="w-3.5 h-3.5 text-muted-foreground"></icon>
                       <span>{{ file.filename || file.id }}</span>
                     </td>
-                    <td class="py-2 px-3 font-mono text-muted-foreground">{{ formatBytes(file.size_bytes || 0) }}</td>
+                    <td class="py-2 px-3 font-mono text-muted-foreground">{{ formatBytes(file.size ?? 0) }}</td>
                     <td class="py-2 px-3">
                       <span class="px-1.5 py-0.5 rounded text-[10px] bg-secondary text-secondary-foreground font-mono">
-                        {{ file.content_type || 'octet-stream' }}
+                        {{ file.mime || 'application/octet-stream' }}
                       </span>
                     </td>
                     <td class="py-2 px-3 font-mono text-muted-foreground">{{ file.user_id || 'shared' }}</td>
@@ -1304,7 +1416,7 @@
             <!-- Terminal Log Window -->
             <div class="rounded-lg border border-border bg-muted/30 p-3 font-mono text-[11px] h-[380px] overflow-y-auto space-y-2">
               <div v-if="filteredStreamEvents.length === 0" class="text-muted-foreground text-center py-14">
-                Listening for real-time published events...
+                {{ streamError || (streamFilter ? 'No events match this filter.' : streamPaused ? 'Event display is paused.' : streamConnected ? 'Listening for new events. Earlier events are not replayed.' : 'Connecting to the live event stream...') }}
               </div>
               <div 
                 v-for="(evt, i) in filteredStreamEvents" 
@@ -1405,7 +1517,7 @@
             <div class="p-2.5 border-b border-border bg-muted/40 flex items-center justify-between">
               <span class="text-xs font-semibold text-foreground">Registered TypeScript Workers</span>
               <button 
-                @click="newWorkerModalOpen = true"
+                @click="openNewWorkerModal()"
                 class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground h-7 px-2.5 text-[11px] font-medium shadow hover:bg-primary/90"
               >
                 <icon name="plus" class="w-3 h-3 mr-1"></icon> Register Worker
@@ -1427,11 +1539,12 @@
                     <td colspan="5" class="py-6 text-center text-muted-foreground text-xs">No workers registered yet.</td>
                   </tr>
                   <tr v-for="w in workers" :key="w.id" class="hover:bg-muted/40 transition-colors">
-                    <td class="py-2 px-3 font-mono text-primary">{{ w.id }}</td>
+                    <td class="py-2 px-3 font-mono text-primary"><button @click="openWorkerDetail(w.id)" class="hover:underline">{{ w.id }}</button></td>
                     <td class="py-2 px-3 font-semibold text-foreground">{{ w.event_name }}</td>
                     <td class="py-2 px-3 text-muted-foreground font-mono">{{ w.created_by }}</td>
                     <td class="py-2 px-3 text-muted-foreground font-mono">{{ formatDate(w.created_at) }}</td>
-                    <td class="py-2 px-3 text-right">
+                    <td class="py-2 px-3 text-right space-x-1">
+                      <button @click="openWorkerDetail(w.id)" class="inline-flex items-center justify-center rounded px-1.5 py-0.5 text-[10px] font-medium border border-border bg-background hover:bg-accent text-foreground shadow-sm">Details</button>
                       <button 
                         @click="deleteWorker(w.id)" 
                         class="inline-flex items-center justify-center rounded px-1.5 py-0.5 text-[10px] font-medium border border-destructive/30 bg-destructive/10 hover:bg-destructive/20 text-destructive shadow-sm"
@@ -1541,15 +1654,15 @@
 
                 <div class="flex items-center justify-between p-2.5 rounded bg-muted/30 border border-border">
                   <span class="text-muted-foreground">AlaSQL Query Engine:</span>
-                  <span :class="['px-2 py-0.5 rounded text-[11px] font-semibold', alasqlReady ? 'bg-teal-500/15 text-teal-700 dark:text-teal-300 border border-teal-500/30' : 'bg-muted text-muted-foreground border border-border']">
-                    {{ alasqlReady ? 'Ready' : 'Unavailable' }}
+                  <span :class="['px-2 py-0.5 rounded text-[11px] font-semibold', alasqlStatus === 'ready' ? 'bg-teal-500/15 text-teal-700 dark:text-teal-300 border border-teal-500/30' : 'bg-muted text-muted-foreground border border-border']">
+                    {{ alasqlStatus === 'ready' ? 'Ready' : alasqlStatus }}
                   </span>
                 </div>
 
                 <div class="flex items-center justify-between p-2.5 rounded bg-muted/30 border border-border">
                   <span class="text-muted-foreground">Nio CLI Intelligence:</span>
                   <span :class="['px-2 py-0.5 rounded text-[11px] font-semibold', nioStatus === 'ready' ? 'bg-teal-500/15 text-teal-700 dark:text-teal-300 border border-teal-500/30' : 'bg-muted text-muted-foreground border border-border']">
-                    {{ nioStatus }}
+                    {{ nioStatus === 'ready' ? 'Configured' : nioStatus }}
                   </span>
                 </div>
               </div>
@@ -1656,6 +1769,23 @@
     </div>
 
     <!-- =================== SHADCN DIALOGS / MODALS =================== -->
+
+    <dialog ref="confirmationDialog" aria-labelledby="confirmation-title" aria-describedby="confirmation-message"
+      @cancel.prevent="finishConfirmation(false)"
+      @click="dismissConfirmationBackdrop($event)"
+      class="w-full max-w-md rounded-xl border border-border bg-card text-foreground p-6 shadow-xl backdrop:bg-black/60 backdrop:backdrop-blur-sm">
+      <div v-if="confirmation" class="space-y-4">
+        <div class="flex items-center justify-between gap-3">
+          <h3 id="confirmation-title" class="text-base font-semibold">{{ confirmation.title }}</h3>
+          <button @click="finishConfirmation(false)" aria-label="Close confirmation" class="text-muted-foreground hover:text-foreground"><icon name="x" class="w-4 h-4"></icon></button>
+        </div>
+        <p id="confirmation-message" class="text-xs text-muted-foreground leading-relaxed break-words">{{ confirmation.message }}</p>
+        <div class="flex justify-end gap-2 pt-2">
+          <button autofocus @click="finishConfirmation(false)" class="rounded-md border border-input bg-background h-8 px-3 text-xs font-medium hover:bg-accent">Cancel</button>
+          <button @click="finishConfirmation(true)" class="rounded-md bg-destructive text-destructive-foreground h-8 px-4 text-xs font-semibold hover:bg-destructive/90">Delete</button>
+        </div>
+      </div>
+    </dialog>
 
     <!-- Token Dialog -->
     <div v-if="tokenModalOpen" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -1912,44 +2042,65 @@
 
     <!-- New Worker Dialog -->
     <div v-if="newWorkerModalOpen" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div class="w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-xl space-y-4">
+      <div class="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl border border-border bg-card p-6 shadow-xl space-y-4">
         <div class="flex items-center justify-between">
-          <h3 class="text-base font-semibold text-foreground">Register Event Worker</h3>
-          <button @click="newWorkerModalOpen = false" class="text-muted-foreground hover:text-foreground">
+          <h3 class="text-base font-semibold text-foreground">{{ editingWorker ? 'Worker Details' : 'Register Event Worker' }}</h3>
+          <button @click="newWorkerModalOpen = false" :disabled="workerSaving" aria-label="Close worker dialog" class="text-muted-foreground hover:text-foreground disabled:opacity-50">
             <icon name="x" class="w-4 h-4"></icon>
           </button>
         </div>
-        <div class="space-y-3 text-xs">
+        <div v-if="workerEditorLoading" class="text-xs text-muted-foreground">Loading worker...</div>
+        <div v-if="workerEditorError" class="rounded-md bg-destructive/10 text-destructive p-2.5 text-xs">{{ workerEditorError }}</div>
+        <div v-if="editingWorker && workerEditorLoaded" class="text-[11px] text-muted-foreground space-y-1 break-all">
+          <div class="font-mono">{{ editingWorker.id }}</div>
+          <div>Created by {{ editingWorker.created_by }} · {{ formatDate(editingWorker.created_at) }}</div>
+        </div>
+        <div v-if="workerEditorLoaded" class="space-y-3 text-xs">
           <div>
             <label class="block font-medium text-muted-foreground mb-1">Event Name</label>
             <input 
               v-model="newWorkerEvent" 
+              :disabled="workerSaving"
               type="text" 
               placeholder="* or record.created"
               class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
             />
           </div>
           <div>
-            <label class="block font-medium text-muted-foreground mb-1">TypeScript / JavaScript Source</label>
+            <div class="flex items-center justify-between mb-1">
+              <label for="worker-source" class="block font-medium text-muted-foreground">TypeScript / JavaScript Source</label>
+              <button @click="formatWorkerSource()" :disabled="workerSaving || workerFormatting" class="rounded-md border border-input bg-background px-2 py-1 text-[11px] hover:bg-accent disabled:opacity-50">
+                {{ workerFormatting ? 'Formatting...' : 'Format Source' }}
+              </button>
+            </div>
             <textarea 
+              id="worker-source"
               v-model="newWorkerSource" 
-              rows="6" 
-              class="flex w-full rounded-md border border-input bg-background px-3 py-2 font-mono shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
+              :disabled="workerSaving"
+              rows="14"
+              wrap="off"
+              spellcheck="false"
+              autocapitalize="off"
+              autocomplete="off"
+              style="tab-size: 2"
+              class="flex w-full rounded-md border border-input bg-muted/40 px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre overflow-x-auto shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground"
             ></textarea>
           </div>
         </div>
         <div class="flex justify-end gap-2 pt-2">
           <button 
             @click="newWorkerModalOpen = false" 
+            :disabled="workerSaving"
             class="inline-flex items-center justify-center rounded-md border border-input bg-background h-8 px-3 text-xs font-medium hover:bg-accent text-foreground shadow-sm"
           >
             Cancel
           </button>
           <button 
-            @click="submitNewWorker()" 
-            class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground font-semibold h-8 px-4 text-xs shadow hover:bg-primary/90"
+            @click="submitNewWorker()"
+            :disabled="workerSaving || workerFormatting || !workerEditorLoaded"
+            class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground font-semibold h-8 px-4 text-xs shadow hover:bg-primary/90 disabled:opacity-50"
           >
-            Register
+            {{ workerSaving ? 'Saving...' : editingWorker ? 'Save Changes' : 'Register' }}
           </button>
         </div>
       </div>
@@ -2041,7 +2192,7 @@
             @click="submitTestLogin()" 
             class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground font-semibold h-8 px-4 text-xs shadow hover:bg-primary/90"
           >
-            Login & Switch Token
+            Test Login
           </button>
         </div>
       </div>
@@ -2289,7 +2440,7 @@
   </div>
 
   <script>
-    const { createApp, ref, computed, onMounted, h } = Vue;
+    const { createApp, ref, computed, onMounted, nextTick, h } = Vue;
 
     // Lucide Icon SVG dictionary
     const lucideIcons = {
@@ -2336,17 +2487,48 @@
       "history": '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M12 7v5l4 2"></path>',
       "list-todo": '<rect x="3" y="5" width="6" height="6" rx="1"></rect><path d="m3 17 2 2 4-4"></path><path d="M13 6h8"></path><path d="M13 12h8"></path><path d="M13 18h8"></path>',
       "trash-2": '<path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line>',
-      "chevron-down": '<path d="m6 9 6 6 6-6"></path>',
-      "chevron-left": '<path d="m15 18-6-6 6-6"></path>',
-      "chevron-right": '<path d="m9 18 6-6 6-6"></path>',
-      "chevrons-left": '<path d="m11 17-5-5 5-5"></path><path d="m18 17-5-5 5-5"></path>',
-      "chevrons-right": '<path d="m6 17 5-5-5-5"></path><path d="m13 17 5-5-5-5"></path>',
+      "chevron-down": '<polyline points="6 9 12 15 18 9"></polyline>',
+      "chevron-left": '<polyline points="15 18 9 12 15 6"></polyline>',
+      "chevron-right": '<polyline points="9 18 15 12 9 6"></polyline>',
+      "chevrons-left": '<polyline points="11 17 6 12 11 7"></polyline><polyline points="18 17 13 12 18 7"></polyline>',
+      "chevrons-right": '<polyline points="6 17 11 12 6 7"></polyline><polyline points="13 17 18 12 13 7"></polyline>',
       "chevrons-up-down": '<path d="m7 15 5 5 5-5"></path><path d="m7 9 5-5 5 5"></path>',
       "check": '<polyline points="20 6 9 17 4 12"></polyline>'
     };
 
     const app = createApp({
       setup() {
+        const confirmationDialog = ref(null);
+        const confirmation = ref(null);
+        let confirmationResolve = null;
+        let confirmationFocus = null;
+        const requestConfirmation = (title, message) => {
+          if (confirmationResolve) return Promise.resolve(false);
+          confirmationFocus = document.activeElement;
+          confirmation.value = { title, message };
+          return new Promise(resolve => {
+            confirmationResolve = resolve;
+            nextTick(() => confirmationDialog.value.showModal());
+          });
+        };
+        const finishConfirmation = (accepted) => {
+          if (!confirmationResolve) return;
+          confirmationDialog.value.close();
+          confirmation.value = null;
+          const resolve = confirmationResolve;
+          confirmationResolve = null;
+          confirmationFocus?.focus();
+          confirmationFocus = null;
+          resolve(accepted);
+        };
+        const dismissConfirmationBackdrop = (event) => {
+          if (event.target !== event.currentTarget) return;
+          const bounds = event.currentTarget.getBoundingClientRect();
+          if (event.clientX < bounds.left || event.clientX > bounds.right
+            || event.clientY < bounds.top || event.clientY > bounds.bottom) {
+            finishConfirmation(false);
+          }
+        };
         // Theme (Light mode by default)
         const isDark = ref(localStorage.getItem("niodb_theme") === "dark");
         if (isDark.value) {
@@ -2390,7 +2572,7 @@
         const tokenModalOpen = ref(!token.value);
         const serverOnline = ref(false);
         const serverVersion = ref("v1.0.1");
-        const alasqlReady = ref(false);
+        const alasqlStatus = ref("Checking...");
         const nioStatus = ref("Checking...");
         const toasts = ref([]);
 
@@ -2399,6 +2581,7 @@
         const recordsLoading = ref(false);
         const searchFilter = ref("");
         const collectionFilter = ref("");
+        const collectionSearch = ref("");
         const collectionDropdownOpen = ref(false);
         const vectorDropdownOpen = ref(false);
         const limit = ref(25);
@@ -2420,6 +2603,16 @@
           loadRecords(1);
         };
 
+        const toggleCollectionDropdown = async () => {
+          collectionDropdownOpen.value = !collectionDropdownOpen.value;
+          vectorDropdownOpen.value = false;
+          if (collectionDropdownOpen.value) {
+            collectionSearch.value = "";
+            await nextTick();
+            document.getElementById('collection-search-input')?.focus();
+          }
+        };
+
         const selectVectorCollection = (col) => {
           vectorSearchCollection.value = col;
           vectorDropdownOpen.value = false;
@@ -2436,8 +2629,14 @@
         // Human Query state
         const humanPrompt = ref("");
         const humanLoading = ref(false);
+        const humanElapsed = ref(null);
+        const formatDuration = (milliseconds) => milliseconds < 1000
+          ? `${Math.round(milliseconds)} ms`
+          : `${(milliseconds / 1000).toFixed(2)} s`;
         const humanAnswer = ref("");
         const humanQueries = ref([]);
+        const humanRecords = ref([]);
+        const humanTableResults = ref([]);
         const humanError = ref(null);
 
         // Files state
@@ -2457,7 +2656,9 @@
         const streamFilter = ref("");
         const streamPaused = ref(false);
         const streamConnected = ref(false);
-        let eventSource = null;
+        const streamError = ref("");
+        let streamController = null;
+        let streamRetry = null;
 
         const publishName = ref("");
         const publishData = ref('{\n  "message": "Hello from NioDB",\n  "count": 1\n}');
@@ -2472,6 +2673,14 @@
         const newWorkerModalOpen = ref(false);
         const newWorkerEvent = ref("*");
         const newWorkerSource = ref("export default async function(event) {\n  console.log('Worker event:', event.name);\n}");
+        const editingWorker = ref(null);
+        const workerEditorLoading = ref(false);
+        const workerEditorLoaded = ref(true);
+        const workerEditorError = ref("");
+        const workerSaving = ref(false);
+        const workerFormatting = ref(false);
+        let workerFormatterPromise = null;
+        let workerFormatVersion = 0;
 
         // Auth & Users state
         const users = ref([]);
@@ -2595,16 +2804,24 @@
           }
 
           try {
-            const res = await fetch("/api/v1/status");
+            const res = await fetch("/api/v1/status", {
+              headers: token.value ? { Authorization: `Bearer ${token.value}` } : {}
+            });
             if (res.ok) {
               const data = await res.json();
               if (data.version) {
                 serverVersion.value = 'v' + data.version;
               }
-              alasqlReady.value = data.alasql?.status === "ready";
+              alasqlStatus.value = data.alasql?.status || "Unavailable";
               nioStatus.value = data.nio?.status || "Unavailable";
+            } else {
+              alasqlStatus.value = res.status === 401 ? "Auth required" : "Unavailable";
+              nioStatus.value = res.status === 401 ? "Auth required" : "Unavailable";
             }
-          } catch {}
+          } catch {
+            alasqlStatus.value = "Unavailable";
+            nioStatus.value = "Unavailable";
+          }
         };
 
         // Token actions
@@ -2614,6 +2831,8 @@
           localStorage.setItem("niodb_token", t);
           tokenModalOpen.value = false;
           toast("Token saved", "success");
+          checkHealth();
+          initStream();
           loadRecords();
           loadBuckets();
           loadUsers();
@@ -2625,6 +2844,8 @@
           localStorage.removeItem("niodb_token");
           tokenModalOpen.value = false;
           toast("Token cleared", "info");
+          checkHealth();
+          initStream();
         };
 
         const testToken = async () => {
@@ -2647,6 +2868,11 @@
             if (c) knownCollections.value.add(c);
           });
           return Array.from(knownCollections.value).sort();
+        });
+
+        const matchingCollections = computed(() => {
+          const query = collectionSearch.value.trim().toLowerCase();
+          return query ? collectionsList.value.filter(c => c.toLowerCase().includes(query)) : collectionsList.value;
         });
 
         const filteredRecords = computed(() => {
@@ -3055,6 +3281,54 @@
           executeSql();
         };
 
+        const handleSqlEditorKeydown = (event) => {
+          if (!(event.ctrlKey || event.metaKey) || (event.key !== '/' && event.code !== 'Slash')) return;
+          event.preventDefault();
+          const editor = event.target;
+          const sql = sqlQuery.value;
+          const start = editor.selectionStart;
+          const end = editor.selectionEnd;
+          const first = sql.lastIndexOf('\n', start - 1) + 1;
+          const lastSelected = end > start && sql[end - 1] === '\n' ? end - 1 : end;
+          const nextNewline = sql.indexOf('\n', lastSelected);
+          const last = nextNewline === -1 ? sql.length : nextNewline;
+          const lines = sql.slice(first, last).split('\n');
+          const nonempty = lines.filter(line => line.trim());
+          const uncomment = nonempty.length > 0 && nonempty.every(line => /^\s*--/.test(line));
+          const edits = [];
+          let position = first;
+          for (const line of lines) {
+            if (line.trim() || lines.length === 1) {
+              const indent = line.match(/^\s*/)[0].length;
+              const marker = /^-- ?/.exec(line.slice(indent));
+              if (uncomment && marker) {
+                edits.push({ position: position + indent, remove: marker[0].length, insert: '' });
+              } else if (!uncomment) {
+                edits.push({ position: position + indent, remove: 0, insert: '-- ' });
+              }
+            }
+            position += line.length + 1;
+          }
+          let updated = sql;
+          for (const edit of edits.slice().reverse()) {
+            updated = updated.slice(0, edit.position) + edit.insert + updated.slice(edit.position + edit.remove);
+          }
+          const remap = (offset) => {
+            let shift = 0;
+            for (const edit of edits) {
+              if (offset < edit.position) break;
+              if (offset <= edit.position + edit.remove) return edit.position + shift + edit.insert.length;
+              shift += edit.insert.length - edit.remove;
+            }
+            return offset + shift;
+          };
+          sqlQuery.value = updated;
+          nextTick(() => {
+            editor.focus();
+            editor.setSelectionRange(remap(start), remap(end));
+          });
+        };
+
         const executeSql = async () => {
           const sql = sqlQuery.value.trim();
           if (!sql) return;
@@ -3108,11 +3382,15 @@
         // Human Query
         const askHuman = async () => {
           const prompt = humanPrompt.value.trim();
-          if (!prompt) return;
+          if (!prompt || humanLoading.value) return;
+          const started = performance.now();
+          humanElapsed.value = null;
           humanLoading.value = true;
           humanError.value = null;
           humanAnswer.value = "";
           humanQueries.value = [];
+          humanRecords.value = [];
+          humanTableResults.value = [];
 
           try {
             const res = await api("/api/v1/assist", {
@@ -3123,6 +3401,12 @@
               const data = await res.json();
               humanAnswer.value = data.message || "Done.";
               humanQueries.value = data.queries || [];
+              humanRecords.value = data.records || [];
+              // Extract aggregated table results from query_results
+              if (data.query_results && data.query_results.length > 0) {
+                const allRows = data.query_results.flatMap(qr => qr.items || []);
+                humanTableResults.value = allRows;
+              }
             } else {
               const err = await res.json().catch(() => ({}));
               humanError.value = err.error?.message || "Assistance unavailable";
@@ -3130,6 +3414,7 @@
           } catch {
             humanError.value = "Failed to communicate with Nio assistant";
           } finally {
+            humanElapsed.value = performance.now() - started;
             humanLoading.value = false;
           }
         };
@@ -3241,7 +3526,8 @@
         };
 
         const deleteFile = async (id) => {
-          if (!confirm("Delete this file permanently?")) return;
+          const filename = files.value.find(file => file.id === id)?.filename || id;
+          if (!await requestConfirmation("Delete file?", `Permanently delete ${filename}? This cannot be undone.`)) return;
           try {
             const res = await api(`/api/v1/storage/${encodeURIComponent(activeBucket.value)}/${encodeURIComponent(id)}`, {
               method: "DELETE"
@@ -3258,35 +3544,67 @@
         };
 
         // Events & SSE Stream
-        const initStream = () => {
+        const initStream = async () => {
+          streamController?.abort();
+          clearTimeout(streamRetry);
+          streamConnected.value = false;
+          streamError.value = "";
+          if (!token.value) {
+            streamError.value = "Set a console token to connect to the event stream.";
+            return;
+          }
+          const controller = new AbortController();
+          streamController = controller;
+          let retry = true;
           try {
-            eventSource = new EventSource("/api/v1/events/stream");
-            eventSource.onopen = () => {
-              streamConnected.value = true;
-            };
-            eventSource.onmessage = (e) => {
-              if (streamPaused.value) return;
-              try {
-                const data = JSON.parse(e.data);
-                streamEvents.value.unshift({
-                  name: data.name || "event",
-                  data: data.data || data,
-                  time: new Date().toLocaleTimeString()
-                });
-              } catch {
-                streamEvents.value.unshift({
-                  name: "message",
-                  data: e.data,
-                  time: new Date().toLocaleTimeString()
-                });
+            const res = await fetch("/api/v1/events/stream", {
+              headers: { Authorization: `Bearer ${token.value}` },
+              signal: controller.signal
+            });
+            if (res.status === 401 || res.status === 403) retry = false;
+            if (!res.ok || !res.body) {
+              streamError.value = retry ? "Event stream unavailable. Reconnecting..." : "The console token cannot access the event stream. Update it using Set Token.";
+              return;
+            }
+            streamConnected.value = true;
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+            while (true) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+              let boundary;
+              while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+                const block = buffer.slice(0, boundary);
+                buffer = buffer.slice(boundary + 2);
+                const lines = block.split("\n");
+                const eventName = lines.find(line => line.startsWith("event:"))?.slice(6).trim() || "message";
+                const payload = lines.filter(line => line.startsWith("data:")).map(line => line.slice(5).trimStart()).join("\n");
+                if (!payload || streamPaused.value) continue;
+                try {
+                  const data = JSON.parse(payload);
+                  streamEvents.value.unshift({
+                    name: eventName === "gap" ? "missed events" : data.name || eventName,
+                    data: eventName === "gap" ? data : data.data || data,
+                    time: new Date().toLocaleTimeString()
+                  });
+                } catch {
+                  streamEvents.value.unshift({ name: eventName, data: payload, time: new Date().toLocaleTimeString() });
+                }
+                if (streamEvents.value.length > 100) streamEvents.value.pop();
               }
-              if (streamEvents.value.length > 100) streamEvents.value.pop();
-            };
-            eventSource.onerror = () => {
-              streamConnected.value = false;
-            };
+              if (buffer.length > 65536) buffer = "";
+            }
           } catch {
-            streamConnected.value = false;
+            if (!controller.signal.aborted) streamError.value = "Event stream disconnected. Reconnecting...";
+            // A dropped stream reconnects below; token changes abort the old connection.
+          } finally {
+            if (streamController === controller) {
+              streamController = null;
+              streamConnected.value = false;
+              if (retry && token.value) streamRetry = setTimeout(initStream, 1500);
+            }
           }
         };
 
@@ -3359,7 +3677,7 @@
         };
 
         const deleteWebhook = async (id) => {
-          if (!confirm("Delete this webhook?")) return;
+          if (!await requestConfirmation("Delete webhook?", "This webhook will stop receiving events.")) return;
           try {
             const res = await api(`/api/v1/webhooks/${encodeURIComponent(id)}`, { method: "DELETE" });
             if (res.ok) {
@@ -3383,30 +3701,114 @@
           } catch {}
         };
 
+        const formatWorkerSource = async (silent = false) => {
+          if (workerSaving.value || workerFormatting.value || !newWorkerSource.value.trim()) return;
+          const version = ++workerFormatVersion;
+          const original = newWorkerSource.value;
+          workerFormatting.value = true;
+          if (!silent) workerEditorError.value = "";
+          try {
+            if (!workerFormatterPromise) {
+              workerFormatterPromise = Promise.all([
+                import("https://unpkg.com/prettier@3.9.9/standalone.mjs"),
+                import("https://unpkg.com/prettier@3.9.9/plugins/typescript.mjs"),
+                import("https://unpkg.com/prettier@3.9.9/plugins/estree.mjs")
+              ]).catch(error => { workerFormatterPromise = null; throw error; });
+            }
+            const [prettier, typescript, estree] = await workerFormatterPromise;
+            const formatted = await prettier.format(original, {
+              parser: "typescript",
+              plugins: [typescript.default || typescript, estree.default || estree],
+              tabWidth: 2,
+              printWidth: 80
+            });
+            if (version === workerFormatVersion && newWorkerModalOpen.value && newWorkerSource.value === original) {
+              newWorkerSource.value = formatted;
+            }
+          } catch (error) {
+            if (!silent && version === workerFormatVersion) {
+              workerEditorError.value = error.name === "SyntaxError"
+                ? "Source could not be formatted. Check its syntax and try again."
+                : "Could not load the source formatter. Try again.";
+            }
+          } finally {
+            if (version === workerFormatVersion) workerFormatting.value = false;
+          }
+        };
+
+        const openNewWorkerModal = () => {
+          workerFormatVersion++;
+          workerFormatting.value = false;
+          editingWorker.value = null;
+          workerEditorLoading.value = false;
+          workerEditorLoaded.value = true;
+          workerEditorError.value = "";
+          newWorkerEvent.value = "*";
+          newWorkerSource.value = "export default async function(event) {\n  console.log('Worker event:', event.name);\n}";
+          newWorkerModalOpen.value = true;
+        };
+
+        const openWorkerDetail = async (id) => {
+          workerFormatVersion++;
+          workerFormatting.value = false;
+          editingWorker.value = { id };
+          workerEditorLoaded.value = false;
+          workerEditorLoading.value = true;
+          workerEditorError.value = "";
+          newWorkerModalOpen.value = true;
+          try {
+            const res = await api(`/api/v1/events/workers/${encodeURIComponent(id)}`);
+            const data = await res.json();
+            if (!newWorkerModalOpen.value || editingWorker.value?.id !== id) return;
+            if (!res.ok) {
+              workerEditorError.value = data.error?.message || "Failed to load worker";
+              return;
+            }
+            editingWorker.value = data;
+            newWorkerEvent.value = data.event_name;
+            newWorkerSource.value = data.source;
+            workerEditorLoaded.value = true;
+            void formatWorkerSource(true);
+          } catch {
+            if (editingWorker.value?.id === id) workerEditorError.value = "Unable to load worker details";
+          } finally {
+            if (editingWorker.value?.id === id) workerEditorLoading.value = false;
+          }
+        };
+
         const submitNewWorker = async () => {
           const event_name = newWorkerEvent.value.trim();
           const source = newWorkerSource.value.trim();
-          if (!event_name || !source) return;
+          if (workerSaving.value || workerFormatting.value || !workerEditorLoaded.value) return;
+          if (!event_name || !source) {
+            workerEditorError.value = "Enter an event name and worker source.";
+            return;
+          }
+          workerSaving.value = true;
+          workerEditorError.value = "";
+          const workerId = editingWorker.value?.id;
           try {
-            const res = await api("/api/v1/events/workers", {
-              method: "POST",
+            const res = await api(workerId ? `/api/v1/events/workers/${encodeURIComponent(workerId)}` : "/api/v1/events/workers", {
+              method: workerId ? "PATCH" : "POST",
               body: JSON.stringify({ event_name, source })
             });
             if (res.ok) {
               newWorkerModalOpen.value = false;
-              toast("Worker registered", "success");
-              loadWorkers();
+              toast(workerId ? "Worker updated" : "Worker registered", "success");
+              await loadWorkers();
             } else {
               const err = await res.json().catch(() => ({}));
-              toast(err.error?.message || "Failed to register worker", "error");
+              workerEditorError.value = err.error?.message || "Failed to save worker";
             }
           } catch {
-            toast("Error registering worker", "error");
+            workerEditorError.value = "Unable to save worker";
+          } finally {
+            workerSaving.value = false;
           }
         };
 
         const deleteWorker = async (id) => {
-          if (!confirm("Delete this worker?")) return;
+          if (!await requestConfirmation("Delete event worker?", "This worker will stop processing events.")) return;
           try {
             const res = await api(`/api/v1/events/workers/${encodeURIComponent(id)}`, { method: "DELETE" });
             if (res.ok) {
@@ -3472,7 +3874,7 @@
         };
 
         const deleteUser = async (id) => {
-          if (!confirm(`Delete user ${id}? This permanently revokes their sessions and linked files.`)) return;
+          if (!await requestConfirmation("Delete user?", `Delete user ${id}? This permanently revokes their sessions and deletes linked files.`)) return;
           try {
             const res = await api(`/api/v1/auth/users/${encodeURIComponent(id)}`, { method: "DELETE" });
             if (res.ok) {
@@ -3497,15 +3899,10 @@
               body: JSON.stringify({ username, password })
             });
             if (res.ok) {
-              const data = await res.json();
               loginTestModalOpen.value = false;
               loginUsername.value = "";
               loginPassword.value = "";
-              token.value = data.access_token;
-              tokenInput.value = data.access_token;
-              localStorage.setItem("niodb_token", data.access_token);
-              toast(`Logged in as ${username}. Session token set!`, "success");
-              loadRecords();
+              toast(`Login successful for ${username}`, "success");
             } else {
               const err = await res.json().catch(() => ({}));
               toast(err.error?.message || "Login failed", "error");
@@ -3749,6 +4146,10 @@
         });
 
         return {
+          confirmationDialog,
+          confirmation,
+          finishConfirmation,
+          dismissConfirmationBackdrop,
           isDark,
           toggleTheme,
           activeNav,
@@ -3763,7 +4164,7 @@
           testToken,
           serverOnline,
           serverVersion,
-          alasqlReady,
+          alasqlStatus,
           nioStatus,
           toasts,
           // Records
@@ -3771,11 +4172,14 @@
           recordsLoading,
           searchFilter,
           collectionFilter,
+          collectionSearch,
           collectionDropdownOpen,
+          toggleCollectionDropdown,
           vectorDropdownOpen,
           selectCollectionFilter,
           selectVectorCollection,
           collectionsList,
+          matchingCollections,
           filteredRecords,
           limit,
           nextCursor,
@@ -3856,13 +4260,18 @@
           sqlMetrics,
           sqlError,
           setSqlPreset,
+          handleSqlEditorKeydown,
           executeSql,
           exportSqlCsv,
           // Human
           humanPrompt,
           humanLoading,
+          humanElapsed,
+          formatDuration,
           humanAnswer,
           humanQueries,
+          humanRecords,
+          humanTableResults,
           humanError,
           askHuman,
           // Files
@@ -3887,6 +4296,7 @@
           streamFilter,
           streamPaused,
           streamConnected,
+          streamError,
           filteredStreamEvents,
           publishName,
           publishData,
@@ -3902,6 +4312,15 @@
           newWorkerModalOpen,
           newWorkerEvent,
           newWorkerSource,
+          editingWorker,
+          workerEditorLoading,
+          workerEditorLoaded,
+          workerEditorError,
+          workerSaving,
+          workerFormatting,
+          formatWorkerSource,
+          openNewWorkerModal,
+          openWorkerDetail,
           submitNewWorker,
           deleteWorker,
           // Auth

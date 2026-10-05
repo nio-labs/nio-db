@@ -39,6 +39,14 @@ if 'records' not in data:
     result = {'action':'query','limit':1}
     if data['message'] == 'clarify': result = {'action':'clarify','question':'Which artifact type?'}
     if data['message'] == 'bad-plan': result = {'action':'query','workspace_id':'other'}
+    aggregates = {
+        'Count total records': {'function':'count'},
+        'Count records by collection': {'function':'count','group_by':'collection'},
+        'Average cpu': {'function':'avg','field':'cpu'},
+        'Invalid aggregate': {'function':'count','group_by':'collection; DROP TABLE artifacts'},
+    }
+    if data['message'] in aggregates:
+        result = {'action':'query','limit':20,'aggregate':aggregates[data['message']]}
 else:
     result = {'status':'answered','message':'Found authorized data.','references':[r['id'] for r in data['records']]}
     if data['message'] == 'bad-citation': result['references'] = ['art_not_supplied']
@@ -59,10 +67,26 @@ pub fn query_fixture(directory: &Directory) -> PathBuf {
 import json, sys, os
 assert not any(key.startswith('NIO_') for key in os.environ)
 if '--check' in sys.argv: print('{"status":"ready"}'); sys.exit(0)
-data = json.load(sys.stdin)
-assert data['protocol'] == 1
-rows = data['tables']['artifacts']
-print(json.dumps({'items':rows[:1], 'total':len(rows)}))
+def output(value):
+    body = json.dumps(value).encode()
+    sys.stdout.buffer.write(len(body).to_bytes(4, 'big') + body)
+    sys.stdout.buffer.flush()
+def read_exact(size):
+    data = b''
+    while len(data) < size:
+        part = sys.stdin.buffer.read(size - len(data))
+        if not part: raise EOFError()
+        data += part
+    return data
+output({'status':'ready', 'protocol':2})
+while True:
+    try:
+        size = int.from_bytes(read_exact(4), 'big')
+        data = json.loads(read_exact(size))
+    except EOFError: break
+    assert data['protocol'] == 2
+    rows = data['records']
+    output({'items':rows[:1], 'total':len(rows)})
 "#,
     )
     .unwrap();

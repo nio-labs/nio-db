@@ -63,6 +63,8 @@ Integrations will use retry/idempotency and event contracts. File and media use 
 
 ## Next phases
 
+The proposed [structured query API](docs/STRUCTURED_QUERY_API.md) adds bounded filters, sorting, pagination, and aggregates executed directly in Rust alongside SQL. The proposal includes the HTTP contract, SDK example, authorization rules, indexing plan, and benchmark checks; implementation remains future work.
+
 1. Install and lock npm dependencies; verify real AlaSQL behavior, joins, aggregates and rejection boundaries. Build the host release and remaining platform matrix. Finalize licensing before publishing.
 2. Add journal compaction, indexes, storage quotas, migration/version policy, complete TOON conformance and explicit import/export.
 3. Add controlled blob extraction and bounded plugin execution using managed file handles. Bucket storage and backups are now implemented.

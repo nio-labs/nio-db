@@ -4,3 +4,6 @@ node_modules/
 .gemini/
 data/
 *.log
+nio-db/
+niodb/
+.benchmark-data-*/

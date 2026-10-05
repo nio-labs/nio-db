@@ -14,6 +14,10 @@ function tokens(sql) {
   let i = 0;
   while (i < sql.length) {
     if (/\s/.test(sql[i])) { i++; continue; }
+    if (sql[i] === '-' && sql[i + 1] === '-') {
+      while (i < sql.length && sql[i] !== '\n') i++;
+      continue;
+    }
     if (sql[i] === "'") {
       let value = ''; i++;
       let closed = false;
@@ -101,8 +105,9 @@ function compileSql(sql, parameters, tables) {
   function disjunction() { let result = conjunction(); while (take('or')) result += ' OR ' + conjunction(); return result; }
   function table() {
     const key = name();
-    if (!Object.hasOwn(tables, key) || !Array.isArray(tables[key])) throw new Error('query_rejected');
-    bindings.push(tables[key]);
+    const source = key === 'records' ? 'artifacts' : key;
+    if (!Object.hasOwn(tables, source) || !Array.isArray(tables[source])) throw new Error('query_rejected');
+    bindings.push(tables[source]);
     let alias = key;
     if (take('as')) alias = name();
     else if (stream[at]?.kind === 'id' && !['left', 'inner', 'join', 'where', 'group', 'order', 'limit', 'offset'].includes(stream[at].value.toLowerCase())) alias = name();

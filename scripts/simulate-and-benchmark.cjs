@@ -1,447 +1,242 @@
 'use strict';
 
 const { spawn, execFileSync } = require('node:child_process');
-const { rmSync, mkdirSync, existsSync, writeFileSync, readFileSync, statSync, readdirSync } = require('node:fs');
-const { join, resolve } = require('node:path');
+const { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, statSync, readdirSync } = require('node:fs');
+const { join, resolve, dirname } = require('node:path');
 const { createHash, randomBytes } = require('node:crypto');
+const os = require('node:os');
+const assert = require('node:assert/strict');
 
-const ROOT_DIR = resolve(__dirname, '..');
-const BINARY = join(ROOT_DIR, 'target', 'release', process.platform === 'win32' ? 'niodb.exe' : 'niodb');
-const DATA_DIR = '/tmp/niodb-simulation-data';
-const PORT = 7488;
-const BASE_URL = `http://127.0.0.1:${PORT}`;
-
-const TOTAL_RECORDS = 10000;
-const BATCH_SIZE = 500;
-
-function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
+const ROOT = resolve(__dirname, '..');
+const SQLITE = process.argv.includes('--sqlite');
+const BINARY = join(ROOT, 'target', 'release', SQLITE ? 'sqlite-benchmark' : (process.platform === 'win32' ? 'niodb.exe' : 'niodb'));
+// Use the repository filesystem, rather than /tmp (which may be a RAM disk).
+const DATA = mkdtempSync(join(ROOT, '.benchmark-data-'));
+const PORT = Number(process.env.NIODB_BENCHMARK_PORT || 7488);
+const BASE = `http://127.0.0.1:${PORT}`;
+const OUTPUT = resolve(process.env.NIODB_BENCHMARK_OUTPUT || join(ROOT, SQLITE ? 'benchmarks/sqlite.json' : 'benchmarks/latest.json'));
+const TOTAL = 10000;
+const BATCH = 500;
+let server;
+let stderr = '';
+let token;
+let seed = 42;
+function random() { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; }
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+function percentile(values, percent) {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.max(0, Math.ceil(percent / 100 * sorted.length) - 1)];
 }
-
-function sha256(buf) {
-  return createHash('sha256').update(buf).digest('hex');
+function summary(values) {
+  return { samples: values.length, mean_ms: values.reduce((a, b) => a + b, 0) / values.length,
+    p50_ms: percentile(values, 50), p95_ms: percentile(values, 95), p99_ms: percentile(values, 99), max_ms: Math.max(...values) };
 }
-
-function percentile(arr, p) {
-  if (!arr.length) return 0;
-  const sorted = [...arr].sort((a, b) => a - b);
-  const idx = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length));
-  return sorted[idx];
+async function request(path, { method = 'GET', body, raw = false, auth = true, expected = 200, headers = {} } = {}) {
+  const response = await fetch(BASE + path, { method,
+    headers: { ...(auth ? { Authorization: `Bearer ${token}` } : {}), ...(body && !raw ? { 'Content-Type': 'application/json' } : {}), ...headers },
+    body: body === undefined ? undefined : raw ? body : JSON.stringify(body), signal: AbortSignal.timeout(15000) });
+  const value = raw ? Buffer.from(await response.arrayBuffer()) : await response.json();
+  assert.equal(response.status, expected, `${method} ${path}: ${JSON.stringify(value)}`);
+  return value;
 }
-
-async function request(path, options = {}) {
-  const url = `${BASE_URL}${path}`;
-  const res = await fetch(url, options);
-  if (options.raw) {
-    return { status: res.status, headers: res.headers, body: Buffer.from(await res.arrayBuffer()) };
+async function measure(samples, warmups, operation) {
+  for (let i = 0; i < warmups; i++) await operation(i);
+  const times = [];
+  for (let i = 0; i < samples; i++) {
+    const start = performance.now();
+    await operation(i);
+    times.push(performance.now() - start);
   }
-  const contentType = res.headers.get('content-type') || '';
-  let body;
-  if (contentType.includes('application/json')) {
-    body = await res.json();
-  } else if (contentType.includes('text/') || contentType.includes('xml')) {
-    body = await res.text();
-  } else {
-    body = Buffer.from(await res.arrayBuffer());
+  return summary(times);
+}
+function bytesUnder(path) {
+  return readdirSync(path, { withFileTypes: true }).reduce((sum, entry) => {
+    const file = join(path, entry.name);
+    return sum + (entry.isDirectory() ? bytesUnder(file) : statSync(file).size);
+  }, 0);
+}
+function processMemory(pid) {
+  try {
+    const status = readFileSync(`/proc/${pid}/status`, 'utf8');
+    const rollup = readFileSync(`/proc/${pid}/smaps_rollup`, 'utf8');
+    return { rss: Number(status.match(/^VmRSS:\s+(\d+)/m)[1]) * 1024,
+      peak: Number(status.match(/^VmHWM:\s+(\d+)/m)[1]) * 1024,
+      pss: Number(rollup.match(/^Pss:\s+(\d+)/m)[1]) * 1024 };
+  } catch { return null; }
+}
+const memory = [];
+function resourceSnapshot(stage) {
+  const rust = processMemory(server.pid);
+  if (!rust) return null;
+  const pids = new Set();
+  // Node can be spawned by any Tokio thread, so inspect every task's children.
+  try {
+    for (const task of readdirSync(`/proc/${server.pid}/task`)) {
+      try {
+        for (const pid of readFileSync(`/proc/${server.pid}/task/${task}/children`, 'utf8').trim().split(/\s+/)) {
+          if (pid) pids.add(Number(pid));
+        }
+      } catch {}
+    }
+  } catch {}
+  const workers = [...pids].map(pid => processMemory(pid)).filter(Boolean);
+  const sqlRss = workers.reduce((sum, worker) => sum + worker.rss, 0);
+  const sqlPss = workers.reduce((sum, worker) => sum + worker.pss, 0);
+  const snapshot = { stage, rust_rss_bytes: rust.rss, rust_peak_rss_bytes: rust.peak,
+    sql_worker_count: workers.length, sql_workers_rss_bytes: sqlRss, combined_rss_bytes: rust.rss + sqlRss,
+    rust_pss_bytes: rust.pss, sql_workers_pss_bytes: sqlPss, combined_pss_bytes: rust.pss + sqlPss };
+  memory.push(snapshot);
+  console.log(`Memory ${stage}: server ${(rust.rss/1048576).toFixed(2)} MiB, SQL workers ${(sqlRss/1048576).toFixed(2)} MiB (${workers.length} processes), combined PSS ${((rust.pss+sqlPss)/1048576).toFixed(2)} MiB.`);
+  return snapshot;
+}
+async function cleanup() {
+  if (server && server.exitCode === null && server.signalCode === null) {
+    const exited = new Promise(resolve => server.once('exit', resolve));
+    server.kill('SIGTERM');
+    const force = setTimeout(() => server.kill('SIGKILL'), 3000);
+    await exited;
+    clearTimeout(force);
   }
-  return { status: res.status, headers: res.headers, body };
+  rmSync(DATA, { recursive: true, force: true });
 }
 
 async function main() {
-  console.log('='.repeat(70));
-  console.log('   NioDB Complete Simulation & Benchmark Suite');
-  console.log(`   Target: ${TOTAL_RECORDS.toLocaleString()} records, 4 files, event streams & auth`);
-  console.log('='.repeat(70));
-
-  // 1. Prepare Sandbox Directory
-  if (existsSync(DATA_DIR)) {
-    rmSync(DATA_DIR, { recursive: true, force: true });
+  console.log(`${SQLITE ? 'SQLite adapter' : 'NioDB'} local HTTP benchmark: 10,000 records, 4 files; one request at a time.`);
+  if (SQLITE) token = randomBytes(32).toString('hex');
+  else {
+    const credentials = JSON.parse(execFileSync(BINARY, ['init-auth', '--dir', DATA, '--name', 'benchmark'], { encoding: 'utf8' }));
+    token = `${credentials.client_token}:${credentials.secret_token}`;
   }
-  mkdirSync(DATA_DIR, { recursive: true });
-
-  // 2. Auth Simulation
-  console.log('\n[1/6] 🔐 Initializing Authentication & Principals...');
-  const initAuthOutput = execFileSync(BINARY, ['init-auth', '--dir', DATA_DIR, '--name', 'admin'], {
-    encoding: 'utf8'
-  });
-  const adminTokens = JSON.parse(initAuthOutput);
-  console.log('  ✓ Admin client token generated');
-  console.log('  ✓ Admin secret token generated');
-
-  const addSecretOutput = execFileSync(
-    BINARY,
-    ['add-secret', '--dir', DATA_DIR],
-    { encoding: 'utf8' }
-  );
-  const workerSecretToken = addSecretOutput.trim();
-  console.log('  ✓ Worker secret token generated and appended to auth.json');
-
-  const adminAuth = { Authorization: `Bearer ${adminTokens.client_token}` };
-  const workerAuth = { Authorization: `Bearer ${workerSecretToken}` };
-
-  // 3. Start NioDB Server
-  console.log('\n[2/6] 🚀 Launching Standalone NioDB Engine...');
-  const serverProcess = spawn(
-    BINARY,
-    ['serve', '--dir', DATA_DIR, '--listen', `127.0.0.1:${PORT}`, '--auth-file', join(DATA_DIR, 'auth.json')],
-    { stdio: ['ignore', 'pipe', 'pipe'] }
-  );
-
-  let serverStarted = false;
-  serverProcess.stderr.on('data', d => {
-    // console.error('[niodb-stderr]', d.toString());
-  });
-
-  // Wait for health endpoint
-  const startTime = Date.now();
-  while (Date.now() - startTime < 10000) {
-    try {
-      const res = await request('/health');
-      if (res.status === 200) {
-        serverStarted = true;
-        break;
-      }
-    } catch {}
+  server = spawn(BINARY, SQLITE ? ['--dir', DATA, '--listen', `127.0.0.1:${PORT}`] :
+    ['serve', '--dir', DATA, '--listen', `127.0.0.1:${PORT}`, '--no-demo'],
+    { stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, ...(SQLITE ? { NIODB_BENCHMARK_TOKEN: token } : {}) } });
+  server.stderr.on('data', chunk => { stderr = (stderr + chunk.toString()).slice(-8192); });
+  let ready = false;
+  for (let i = 0; i < 100; i++) {
+    if (server.exitCode !== null) throw new Error(`Benchmark server exited: ${stderr}`);
+    try { await request('/health', { auth: false }); ready = true; break; } catch {}
     await sleep(100);
   }
+  if (!ready) throw new Error(`Benchmark server did not start: ${stderr}`);
+  const health = await request('/health', { auth: false });
+  resourceSnapshot('startup');
+  await request('/api/v1/records', { auth: false, expected: 401 });
+  assert.equal((await request('/api/v1/records')).total, 0);
 
-  if (!serverStarted) {
-    throw new Error('NioDB server failed to start within 10 seconds');
+  await request('/api/v1/storage', { method: 'POST', body: { name: 'assets' }, expected: 201 });
+  const assets = [
+    { name: 'schema.json', mime: 'application/json', bytes: Buffer.from('{"title":"Benchmark schema","version":1}\n') },
+    { name: 'architecture.md', mime: 'text/markdown', bytes: Buffer.from('# Benchmark fixture\nAppend-only journal, records, files, SQL and vectors.\n') },
+    { name: 'logo.svg', mime: 'image/svg+xml', bytes: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4"/></svg>') },
+    { name: 'weights.bin', mime: 'application/octet-stream', bytes: Buffer.alloc(64 * 1024, 42) },
+  ];
+  for (const asset of assets) {
+    const response = await fetch(`${BASE}/api/v1/storage/assets/upload?filename=${asset.name}`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': asset.mime }, body: asset.bytes });
+    const file = await response.json();
+    assert.equal(response.status, 201, JSON.stringify(file));
+    assert.equal(file.size, asset.bytes.length);
+    assert.equal(hash(await request(`/api/v1/storage/assets/${file.id}`, { raw: true })), hash(asset.bytes));
   }
-  console.log(`  ✓ NioDB Server running at ${BASE_URL} (pid: ${serverProcess.pid})`);
+  console.log('Authentication and 4 file uploads/downloads verified.');
+  resourceSnapshot('after_files');
+  // No workers/webhooks/subscribers registered: measure publish acceptance only.
+  const events = await measure(50, 0, i => request('/api/v1/events', {
+    method: 'POST', expected: 202, body: { name: 'benchmark.ping', data: { sequence: i } } }));
 
-  // Verify Auth Gates
-  const unauthRes = await request('/api/v1/records');
-  if (unauthRes.status !== 401) {
-    throw new Error(`Expected 401 Unauthorized, got ${unauthRes.status}`);
-  }
-  console.log('  ✓ Security check: Unauthenticated access strictly blocked (401 Unauthorized)');
-
-  const authRes = await request('/api/v1/records', { headers: adminAuth });
-  if (authRes.status !== 200) {
-    throw new Error(`Expected 200 OK, got ${authRes.status}`);
-  }
-  console.log('  ✓ Security check: Bearer token authentication verified (200 OK)');
-
-  // 4. File / Blob Simulation (4 files)
-  console.log('\n[3/6] 📁 Simulating File Storage & Blobs (4 Diverse Assets)...');
-  await request('/api/v1/storage', {
-    method: 'POST',
-    headers: { ...adminAuth, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: 'system_assets' })
+  const records = Array.from({ length: TOTAL }, (_, index) => {
+    const i = index + 1;
+    if (i <= 5000) return { collection: 'telemetry', data: {
+      metric_id: `met_${i}`, service: ['auth', 'billing', 'api', 'vectors', 'sync'][i % 5],
+      cpu_percent: Math.round((Math.sin(i) * 30 + 50) * 10) / 10, mem_mb: 128 + i % 256,
+      status: i % 100 === 0 ? 'degraded' : 'ok', latency_ms: 15 + i % 80,
+      timestamp: 1728000000000 + i * 1000 } };
+    if (i <= 8000) return { collection: 'customers', data: {
+      customer_id: `cust_${i - 5000}`, name: `Client ${i - 5000}`, email: `client${i - 5000}@example.com`,
+      plan: ['free', 'pro', 'enterprise'][i % 3], credits: 100 + i * 7 % 5000,
+      country: ['US', 'DE', 'SG', 'JP', 'FR', 'UK', 'CA'][i % 7], active: i % 15 !== 0 } };
+    const vector = Array.from({ length: 8 }, (_, d) => Math.sin((i - 8000) * 0.1 + d));
+    const norm = Math.hypot(...vector);
+    return { collection: 'ai_memories', data: {
+      memory_id: `mem_${i - 8000}`, summary: `Codebase architecture step ${i - 8000}`,
+      embedding: vector.map(x => Math.round(x / norm * 1000) / 1000), importance: i % 10 / 10 } };
   });
-  console.log('  ✓ Bucket "system_assets" created');
-
-  const filesToUpload = [
-    {
-      name: 'app_schema.json',
-      mime: 'application/json',
-      content: Buffer.from(JSON.stringify({
-        $schema: 'http://json-schema.org/draft-07/schema#',
-        title: 'NioDB App Entity Schema',
-        properties: { id: { type: 'string' }, timestamp: { type: 'integer' } }
-      }, null, 2))
-    },
-    {
-      name: 'architecture_spec.md',
-      mime: 'text/markdown',
-      content: Buffer.from(`# NioDB Architecture Specification\n\n- Pure Rust Storage Engine\n- Append-Only Journaling with Fast Recovery\n- In-Memory Vector Search with Cosine Distance\n- Embedded AlaSQL Sandboxed Execution\n- Single Binary Zero Daemon Footprint\n`)
-    },
-    {
-      name: 'brand_logo.svg',
-      mime: 'image/svg+xml',
-      content: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="45" fill="#4F46E5"/><text x="50" y="58" font-size="24" fill="#ffffff" text-anchor="middle" font-family="sans-serif">NIO</text></svg>`)
-    },
-    {
-      name: 'weights_matrix.bin',
-      mime: 'application/octet-stream',
-      content: randomBytes(64 * 1024) // 64 KB binary dataset
-    }
+  const ids = [];
+  const batches = [];
+  const start = performance.now();
+  for (let offset = 0; offset < TOTAL; offset += BATCH) {
+    const t = performance.now();
+    const result = await request('/api/v1/records/bulk', { method: 'POST', body: records.slice(offset, offset + BATCH) });
+    batches.push(performance.now() - t);
+    assert.equal(result.inserted, BATCH);
+    ids.push(...result.records.map(record => record.id));
+  }
+  const ingestionMs = performance.now() - start;
+  assert.equal(ids.length, TOTAL);
+  assert.equal((await request('/api/v1/records')).total, TOTAL + 4);
+  console.log(`Ingested ${TOTAL} records in ${(ingestionMs / 1000).toFixed(2)} s.`);
+  resourceSnapshot('after_ingestion');
+  const lookups = await measure(1000, 20, async () => {
+    const id = ids[Math.floor(random() * ids.length)];
+    assert.equal((await request(`/api/v1/records/${id}`)).id, id);
+  });
+  resourceSnapshot('after_lookups');
+  const scans = await measure(100, 5, async () => {
+    const result = await request('/api/v1/records?collection=telemetry&limit=50');
+    assert.equal(result.items.length, 50);
+    assert.equal(result.total, 5000);
+  });
+  resourceSnapshot('after_scans');
+  const vector = Array.from({ length: 8 }, (_, d) => Math.sin(0.5 + d));
+  const norm = Math.hypot(...vector);
+  const vectors = await measure(100, 5, async () => {
+    const result = await request('/api/v1/records/search', { method: 'POST', body: {
+      collection: 'ai_memories', vector: vector.map(x => x / norm), top_k: 10, min_score: 0.6 } });
+    assert.equal(result.items.length, 10);
+  });
+  resourceSnapshot('after_vectors');
+  const queries = [
+    'SELECT plan, COUNT(*) AS user_count, AVG(credits) AS avg_credits FROM customers GROUP BY plan',
+    "SELECT service, AVG(latency_ms) AS avg_latency FROM telemetry WHERE status = 'ok' GROUP BY service",
+    'SELECT name, email, credits FROM customers ORDER BY credits DESC LIMIT 5',
   ];
-
-  const uploadedFiles = [];
-  for (const file of filesToUpload) {
-    const t0 = performance.now();
-    const upRes = await request(`/api/v1/storage/system_assets/upload?filename=${file.name}`, {
-      method: 'POST',
-      headers: { ...adminAuth, 'Content-Type': file.mime },
-      body: file.content
-    });
-    const uploadDuration = (performance.now() - t0).toFixed(2);
-    if (upRes.status !== 201) {
-      throw new Error(`Upload failed for ${file.name}: ${JSON.stringify(upRes.body)}`);
-    }
-    const fileId = upRes.body.id || upRes.body.file_id || upRes.body.filename;
-
-    // Download & Verify
-    const dlRes = await request(`/api/v1/storage/system_assets/${fileId}`, { headers: adminAuth, raw: true });
-    if (dlRes.status !== 200) {
-      throw new Error(`Download failed for ${file.name}: status ${dlRes.status}`);
-    }
-    const dlHash = sha256(dlRes.body);
-    const origHash = sha256(file.content);
-    if (dlHash !== origHash) {
-      throw new Error(`SHA256 mismatch for ${file.name}! Original: ${origHash}, Downloaded: ${dlHash}`);
-    }
-    uploadedFiles.push({ name: file.name, size: file.content.length, durationMs: uploadDuration });
-    console.log(`  ✓ [File] ${file.name.padEnd(22)} (${(file.content.length / 1024).toFixed(1)} KB) -> Upload & SHA-256 match in ${uploadDuration}ms`);
-  }
-
-  // 5. Events Simulation
-  console.log('\n[4/6] ⚡ Simulating Event Streaming & Pub/Sub...');
-  const eventTypes = ['user.signup', 'task.dispatched', 'order.fulfilled', 'agent.checkpoint', 'backup.completed'];
-  const eventTimes = [];
-  for (let i = 0; i < 50; i++) {
-    const evtName = eventTypes[i % eventTypes.length];
-    const t0 = performance.now();
-    const evRes = await request('/api/v1/events', {
-      method: 'POST',
-      headers: { ...workerAuth, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: evtName,
-        data: {
-          event_seq: i + 1,
-          agent: 'agent-worker',
-          timestamp: Date.now(),
-          trace_id: randomBytes(8).toString('hex')
-        }
-      })
-    });
-    eventTimes.push(performance.now() - t0);
-    if (evRes.status < 200 || evRes.status >= 300) {
-      throw new Error(`Event publish failed: ${JSON.stringify(evRes.body)}`);
-    }
-  }
-  console.log(`  ✓ Published 50 domain events across 5 topics (Avg publish latency: ${(eventTimes.reduce((a,b)=>a+b,0)/eventTimes.length).toFixed(2)}ms)`);
-
-  // 6. Ingesting 10,000 Records
-  console.log(`\n[5/6] 📊 Ingesting ${TOTAL_RECORDS.toLocaleString()} Realistic Documents Across 3 Collections...`);
-  console.log(`  - 5,000 "telemetry" metric time-series logs`);
-  console.log(`  - 3,000 "customers" user account profiles`);
-  console.log(`  - 2,000 "ai_memories" with 8D float embedding vectors`);
-
-  const plans = ['free', 'pro', 'enterprise'];
-  const services = ['auth-service', 'billing-worker', 'api-gateway', 'vector-index', 'db-syncer'];
-  const countries = ['US', 'DE', 'SG', 'JP', 'FR', 'UK', 'CA'];
-
-  const allRecords = [];
-  for (let i = 1; i <= TOTAL_RECORDS; i++) {
-    if (i <= 5000) {
-      allRecords.push({
-        collection: 'telemetry',
-        data: {
-          metric_id: `met_${i}`,
-          service: services[i % services.length],
-          cpu_percent: Math.round((Math.sin(i) * 30 + 50) * 10) / 10,
-          mem_mb: 128 + (i % 256),
-          status: i % 100 === 0 ? 'degraded' : 'ok',
-          latency_ms: Math.round(15 + (i % 80) + Math.random() * 5),
-          timestamp: 1728000000000 + i * 1000
-        }
-      });
-    } else if (i <= 8000) {
-      const custIdx = i - 5000;
-      allRecords.push({
-        collection: 'customers',
-        data: {
-          customer_id: `cust_${custIdx}`,
-          name: `Client User ${custIdx}`,
-          email: `client${custIdx}@example.com`,
-          plan: plans[custIdx % plans.length],
-          credits: 100 + (custIdx * 7) % 5000,
-          country: countries[custIdx % countries.length],
-          active: custIdx % 15 !== 0,
-          created_at: 1720000000000 + custIdx * 100000
-        }
-      });
-    } else {
-      const memIdx = i - 8000;
-      // 8-dim normalized embedding vector
-      const v = Array.from({ length: 8 }, (_, d) => Math.sin(memIdx * 0.1 + d));
-      const norm = Math.sqrt(v.reduce((s, x) => s + x * x, 0)) || 1;
-      const normalizedVector = v.map(x => Math.round((x / norm) * 1000) / 1000);
-
-      allRecords.push({
-        collection: 'ai_memories',
-        data: {
-          memory_id: `mem_${memIdx}`,
-          agent: memIdx % 2 === 0 ? 'claude-3-7-sonnet' : 'gpt-4o',
-          goal: `Task resolution session ${memIdx % 200}`,
-          summary: `Synthesized codebase architecture step ${memIdx}`,
-          embedding: normalizedVector,
-          importance: Math.round(Math.random() * 10) / 10
-        }
-      });
-    }
-  }
-
-  const batchLatencies = [];
-  const insertedIds = [];
-  const ingestStart = performance.now();
-
-  for (let offset = 0; offset < TOTAL_RECORDS; offset += BATCH_SIZE) {
-    const chunk = allRecords.slice(offset, offset + BATCH_SIZE);
-    const b0 = performance.now();
-    const bulkRes = await request('/api/v1/records/bulk', {
-      method: 'POST',
-      headers: { ...adminAuth, 'Content-Type': 'application/json' },
-      body: JSON.stringify(chunk)
-    });
-    const bTime = performance.now() - b0;
-    batchLatencies.push(bTime);
-
-    if (bulkRes.status !== 200) {
-      throw new Error(`Bulk insert batch at ${offset} failed: ${JSON.stringify(bulkRes.body)}`);
-    }
-
-    const recs = bulkRes.body.records || [];
-    for (const r of recs) {
-      if (r.id) insertedIds.push(r.id);
-    }
-
-    const pct = Math.round(((offset + chunk.length) / TOTAL_RECORDS) * 100);
-    process.stdout.write(`\r  ⚡ Ingested ${(offset + chunk.length).toLocaleString()} / ${TOTAL_RECORDS.toLocaleString()} records [${pct}%] (Batch: ${bTime.toFixed(1)}ms)...`);
-  }
-
-  const ingestElapsedSec = (performance.now() - ingestStart) / 1000;
-  const throughput = Math.round(TOTAL_RECORDS / ingestElapsedSec);
-  console.log(`\n  ✓ Ingested ${TOTAL_RECORDS.toLocaleString()} records in ${ingestElapsedSec.toFixed(2)}s (${throughput.toLocaleString()} records/sec)`);
-
-  // 7. Benchmark Suite: Lookups, Scans, Vector Search & AlaSQL
-  console.log('\n[6/6] 🔬 Running Performance & Latency Benchmark...');
-
-  // A. Random Point Lookups by ID
-  const pointLookupTimes = [];
-  const sampleIds = [];
-  for (let i = 0; i < 50; i++) {
-    const randIdx = Math.floor(Math.random() * insertedIds.length);
-    sampleIds.push(insertedIds[randIdx]);
-  }
-
-  for (const id of sampleIds) {
-    const t0 = performance.now();
-    const lRes = await request(`/api/v1/records/${id}`, { headers: adminAuth });
-    pointLookupTimes.push(performance.now() - t0);
-    if (lRes.status !== 200) {
-      throw new Error(`Point lookup failed for ${id}`);
-    }
-  }
-
-  // B. Filtered Collection Scans
-  const scanTimes = [];
-  for (let i = 0; i < 20; i++) {
-    const t0 = performance.now();
-    const sRes = await request('/api/v1/records?collection=telemetry&limit=50', { headers: adminAuth });
-    scanTimes.push(performance.now() - t0);
-    if (sRes.status !== 200) {
-      throw new Error('Scan failed');
-    }
-  }
-
-  // C. Vector Similarity Search
-  const vectorTimes = [];
-  const queryVector = Array.from({ length: 8 }, (_, d) => Math.sin(0.5 + d));
-  const vNorm = Math.sqrt(queryVector.reduce((s, x) => s + x * x, 0)) || 1;
-  const normQueryVector = queryVector.map(x => Math.round((x / vNorm) * 1000) / 1000);
-
-  for (let i = 0; i < 20; i++) {
-    const t0 = performance.now();
-    const vRes = await request('/api/v1/records/search', {
-      method: 'POST',
-      headers: { ...adminAuth, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        collection: 'ai_memories',
-        vector: normQueryVector,
-        top_k: 10,
-        min_score: 0.6
-      })
-    });
-    vectorTimes.push(performance.now() - t0);
-    if (vRes.status !== 200) {
-      throw new Error(`Vector search failed: ${JSON.stringify(vRes.body)}`);
-    }
-  }
-
-  // D. Sandboxed AlaSQL Engine Queries
-  const sqlTimes = [];
-  const sqlQueries = [
-    'SELECT plan, COUNT(*) as user_count, AVG(credits) as avg_credits FROM customers GROUP BY plan',
-    "SELECT service, AVG(latency_ms) as avg_latency FROM telemetry WHERE status = 'ok' GROUP BY service",
-    'SELECT name, email, credits FROM customers ORDER BY credits DESC LIMIT 5'
-  ];
-
-  let sqlResults = null;
-  for (const query of sqlQueries) {
-    const t0 = performance.now();
-    const qRes = await request('/api/v1/query', {
-      method: 'POST',
-      headers: { ...adminAuth, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sql: query })
-    });
-    sqlTimes.push(performance.now() - t0);
-    if (qRes.status !== 200) {
-      throw new Error(`SQL query failed: ${JSON.stringify(qRes.body)}`);
-    }
-    if (!sqlResults) sqlResults = qRes.body;
-  }
-
-  // E. Disk Footprint & Process Resource Measurement
-  function getDirectorySize(dir) {
-    let total = 0;
-    const entries = readdirSync(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      const full = join(dir, entry.name);
-      if (entry.isDirectory()) {
-        total += getDirectorySize(full);
-      } else {
-        total += statSync(full).size;
-      }
-    }
-    return total;
-  }
-
-  const diskBytes = getDirectorySize(DATA_DIR);
-  const diskMB = (diskBytes / (1024 * 1024)).toFixed(2);
-
-  // Terminate server cleanly
-  serverProcess.kill('SIGTERM');
-  await sleep(500);
-
-  // Results Presentation
-  console.log('\n' + '='.repeat(70));
-  console.log('                 FINAL PERFORMANCE REPORT');
-  console.log('='.repeat(70));
-
-  console.log('\n📈 INGESTION & THROUGHPUT:');
-  console.log(`  • Total Simulated Records : ${TOTAL_RECORDS.toLocaleString()}`);
-  console.log(`  • Ingestion Time          : ${ingestElapsedSec.toFixed(2)} seconds`);
-  console.log(`  • Sustained Throughput    : ${throughput.toLocaleString()} records / sec`);
-  console.log(`  • Batch Latency (500 rec) : P50 = ${percentile(batchLatencies, 50).toFixed(1)}ms | P95 = ${percentile(batchLatencies, 95).toFixed(1)}ms | Max = ${Math.max(...batchLatencies).toFixed(1)}ms`);
-
-  console.log('\n⚡ QUERY LATENCY (10,000 Record Corpus):');
-  console.log(`  • Point Lookup (by ID)    : P50 = ${percentile(pointLookupTimes, 50).toFixed(2)}ms | P95 = ${percentile(pointLookupTimes, 95).toFixed(2)}ms | P99 = ${percentile(pointLookupTimes, 99).toFixed(2)}ms`);
-  console.log(`  • Filtered Scan (limit 50): P50 = ${percentile(scanTimes, 50).toFixed(2)}ms | P95 = ${percentile(scanTimes, 95).toFixed(2)}ms`);
-  console.log(`  • 8D Vector Search (2K vec): P50 = ${percentile(vectorTimes, 50).toFixed(2)}ms | P95 = ${percentile(vectorTimes, 95).toFixed(2)}ms`);
-  console.log(`  • AlaSQL Aggregation Query: P50 = ${percentile(sqlTimes, 50).toFixed(2)}ms | P95 = ${percentile(sqlTimes, 95).toFixed(2)}ms`);
-
-  console.log('\n🗄️ DISK & STORAGE FOOTPRINT:');
-  console.log(`  • Total Data Directory    : ${diskMB} MB for ${TOTAL_RECORDS.toLocaleString()} records + 4 files`);
-  console.log(`  • Average Record Footprint: ${((diskBytes / TOTAL_RECORDS) / 1024).toFixed(2)} KB / record (including index & journal)`);
-
-  console.log('\n🛡️ FILES & ASSETS STORED:');
-  for (const f of uploadedFiles) {
-    console.log(`  • ${f.name.padEnd(24)}: ${(f.size / 1024).toFixed(1)} KB (verified SHA-256)`);
-  }
-
-  console.log('\n🎯 SQL ENGINE SAMPLE RESULT:');
-  console.log(JSON.stringify(sqlResults?.items || sqlResults, null, 2));
-
-  console.log('\n' + '='.repeat(70));
-  console.log('   NioDB Stress Test & Data Simulation: 100% SUCCESS');
-  console.log('='.repeat(70) + '\n');
+  const sql = await measure(30, 3, async i => {
+    const result = await request('/api/v1/query', { method: 'POST', body: { sql: queries[i % 3] } });
+    assert.equal(result.items.length, [3, 5, 5][i % 3]);
+    if (i % 3 === 0) assert.equal(result.items.reduce((sum, row) => sum + row.user_count, 0), 3000);
+  });
+  resourceSnapshot('after_sql');
+  await sleep(2000);
+  const finalMemory = resourceSnapshot('idle_2s');
+  let filesystem = null;
+  try { filesystem = execFileSync('df', ['-T', DATA], { encoding: 'utf8' }).trim().split('\n').pop().split(/\s+/)[1]; } catch {}
+  const report = {
+    measured_at: new Date().toISOString(), engine: SQLITE ? 'SQLite HTTP adapter' : 'NioDB',
+    engine_version: SQLITE ? health.sqlite_version : JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version,
+    binary_sha256: hash(readFileSync(BINARY)), version: JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version,
+    environment: { os: `${os.type()} ${os.release()}`, arch: os.arch(), cpu: os.cpus()[0].model,
+      logical_cpus: os.cpus().length, total_memory_bytes: os.totalmem(), node: process.version,
+      build: SQLITE ? 'cargo build --release --locked --features sqlite-benchmark --bin sqlite-benchmark' : 'cargo build --release --locked', filesystem },
+    methodology: { transport: 'HTTP over loopback, full response body parsed', concurrency: 1,
+      dataset_records: TOTAL, file_metadata_records: 4, collections: { telemetry: 5000, customers: 3000, ai_memories: 2000 },
+      vector_dimensions: 8, batch_size: BATCH, random_seed: 42, warmups: { lookups: 20, scans: 5, vectors: 5, sql: 3 },
+      sql_queries: queries, demos: false, llm_included: false, event_handlers: 0,
+      ...(SQLITE ? { sqlite_journal_mode: 'WAL', sqlite_synchronous: 'FULL', adapter: 'Rust/Axum; typed SQLite tables for benchmark SQL; vector similarity computed in Rust after SQLite scan' } : {}) },
+    ingestion: { total_ms: ingestionMs, records_per_second: TOTAL / (ingestionMs / 1000), batch_latency: summary(batches) },
+    latency: { point_lookup: lookups, collection_scan: scans, vector_search: vectors, sql, event_publish: events },
+    storage: { total_bytes: bytesUnder(DATA), journal_bytes: SQLITE ? null : statSync(join(DATA, 'journal.jsonl')).size,
+      file_payload_bytes: assets.reduce((sum, asset) => sum + asset.bytes.length, 0),
+      server_rss_bytes: finalMemory?.rust_rss_bytes ?? null, memory_stages: memory, rss_note: 'Stage snapshots include Rust and direct SQL child processes; peak applies to Rust only' },
+    verification: { unauthenticated_status: 401, file_sha256_verified: 4, inserted_records: ids.length,
+      query_results_checked: true, failures: 0 },
+  };
+  mkdirSync(dirname(OUTPUT), { recursive: true });
+  writeFileSync(OUTPUT, JSON.stringify(report, null, 2) + '\n');
+  console.table(Object.fromEntries(Object.entries(report.latency).map(([name, result]) => [name, {
+    samples: result.samples, p50_ms: result.p50_ms.toFixed(2), p95_ms: result.p95_ms.toFixed(2), p99_ms: result.p99_ms.toFixed(2) }])));
+  console.log(`Throughput: ${report.ingestion.records_per_second.toFixed(0)} records/s; data: ${(report.storage.total_bytes / 1048576).toFixed(2)} MiB.`);
+  console.log(`Report saved to ${OUTPUT}. Temporary benchmark data is removed after shutdown.`);
 }
 
-main().catch(err => {
-  console.error('\n❌ Benchmark simulation failed:', err);
-  process.exit(1);
-});
+main().catch(error => { console.error(error); process.exitCode = 1; }).finally(cleanup);

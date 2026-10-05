@@ -1,5 +1,6 @@
 /target/
 /niodb/
+/nio-db/
 dist/
 build/
 *.tgz
@@ -10,3 +11,4 @@ __pycache__/
 *.egg-info/
 .DS_Store
 
+/.benchmark-data-*/

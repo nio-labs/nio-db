@@ -8,6 +8,7 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 pub const MAX_JOURNAL_BYTES: u64 = 64 * 1024 * 1024 * 1024;
@@ -37,6 +38,62 @@ mod tests {
     use super::*;
     use crate::test_support::Directory;
     use serde_json::json;
+
+    #[test]
+    fn bulk_frame_is_atomic_recovers_and_repairs_derived_projections() {
+        let directory = Directory::new();
+        let mut store = Store::open(&directory.0).unwrap();
+        let base = store.create("a", "records".into(), serde_json::json!({"value":0}).as_object().unwrap().clone(), None).unwrap();
+        let prefix = fs::read(directory.0.join("journal.jsonl")).unwrap();
+        let items = || (1..=25).map(|i| (Some("records".into()), serde_json::json!({"value":i,"ttl":3600}).as_object().unwrap().clone())).collect();
+        let mut invalid: Vec<_> = items();
+        invalid.push((Some("".into()), Map::new()));
+        assert!(store.bulk_insert("a", None, invalid).is_err());
+        assert_eq!(store.list("a", None).len(), 1);
+        assert_eq!(fs::read(directory.0.join("journal.jsonl")).unwrap(), prefix);
+        let result = store.bulk_insert("a", None, items()).unwrap();
+        assert_eq!(result.len(), 25);
+        assert!(result.iter().all(|a| a.data.get("expires_at").is_some()));
+        let committed = fs::read(directory.0.join("journal.jsonl")).unwrap();
+        assert_eq!(committed.iter().filter(|&&b| b == b'\n').count(), 2);
+        let cache = directory.0.join("artifacts").join(format!("{}.toon", result[0].id));
+        fs::write(&cache, "damaged cache").unwrap();
+        drop(store);
+        let store = Store::open(&directory.0).unwrap();
+        assert_eq!(store.list("a", None).len(), 26);
+        assert_ne!(fs::read_to_string(&cache).unwrap(), "damaged cache");
+        drop(store);
+        // A crash anywhere within the final frame leaves the whole batch absent.
+        let partial = &committed[..prefix.len() + (committed.len() - prefix.len()) / 2];
+        fs::write(directory.0.join("journal.jsonl"), partial).unwrap();
+        let store = Store::open(&directory.0).unwrap();
+        assert_eq!(store.list("a", None).len(), 1);
+        assert_eq!(store.list("a", None)[0].id, base.id);
+        assert_eq!(fs::read(directory.0.join("journal.jsonl")).unwrap(), prefix);
+        assert!(!cache.exists());
+    }
+
+    #[test]
+    fn snapshots_preserve_versions_and_paging_clones_only_visible_results() {
+        let directory = Directory::new();
+        let mut store = Store::open(&directory.0).unwrap();
+        let records = store.bulk_insert("a", Some("records".into()), (0..10).map(|i| (None, serde_json::json!({"owner_id":if i%2==0 {"alice"} else {"bob"},"value":i}).as_object().unwrap().clone())).collect()).unwrap();
+        let old = store.snapshot_visible("a", None, Some("alice"));
+        assert_eq!(old.len(), 5);
+        let id = old[0].id.clone();
+        store.update("a", &id, serde_json::json!({"value":99}).as_object().unwrap().clone(), true, Some("alice")).unwrap();
+        assert_ne!(old[0].data["value"], 99);
+        assert_eq!(store.get("a", &id).unwrap().data["value"], 99);
+        let (page,total,more) = store.page_visible("a", None, Some("alice"), None, 1, 2).unwrap();
+        assert_eq!((page.len(),total,more), (2,5,true));
+        let anchor = page.last().unwrap();
+        let (next,_,more) = store.page_visible("a", None, Some("alice"), Some((&anchor.created_at,&anchor.id)), 0, 2).unwrap();
+        assert_eq!(next.len(), 2);
+        assert!(!more);
+        assert!(store.page_visible("a", None, Some("bob"), Some((&anchor.created_at,&anchor.id)), 0, 2).is_none());
+        assert_eq!(store.page_visible("a", None, None, None, usize::MAX, 2).unwrap().0.len(), 0);
+        assert_eq!(records.len(), 10);
+    }
 
     #[test]
     fn recovery_preserves_commits_and_discards_only_partial_tail() {
@@ -344,6 +401,7 @@ impl Drop for UploadTicket {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 enum Event {
+    Batch { events: Vec<Event> },
     Artifact {
         artifact: Artifact,
         idempotency: Option<String>,
@@ -383,6 +441,9 @@ enum Event {
     WorkerDeleted {
         id: String,
     },
+    DemoSeeded {
+        payload: Value,
+    },
     WebhookCreated {
         webhook: Webhook,
     },
@@ -402,7 +463,7 @@ pub struct Store {
     root: PathBuf,
     _lock: File,
     journal: File,
-    artifacts: BTreeMap<String, Artifact>,
+    artifacts: BTreeMap<String, Arc<Artifact>>,
     conversations: BTreeMap<String, Conversation>,
     idempotency: BTreeMap<String, (String, String)>,
     users: BTreeMap<String, UserRecord>,
@@ -410,6 +471,7 @@ pub struct Store {
     buckets: BTreeMap<(String, String), Bucket>,
     files: BTreeMap<String, StoredFile>,
     event_workers: BTreeMap<String, EventWorker>,
+    demo_event: Option<Value>,
     webhooks: BTreeMap<String, Webhook>,
     pub healthy: bool,
 }
@@ -451,6 +513,7 @@ impl Store {
             buckets: BTreeMap::new(),
             files: BTreeMap::new(),
             event_workers: BTreeMap::new(),
+            demo_event: None,
             webhooks: BTreeMap::new(),
             healthy: true,
         };
@@ -555,6 +618,9 @@ impl Store {
 
     fn apply(&mut self, event: Event) {
         match event {
+            Event::Batch { events } => {
+                for event in events { self.apply(event); }
+            }
             Event::Artifact {
                 artifact,
                 idempotency,
@@ -564,7 +630,7 @@ impl Store {
                     self.idempotency
                         .insert(key, (fingerprint, artifact.id.clone()));
                 }
-                self.artifacts.insert(artifact.id.clone(), artifact);
+                self.artifacts.insert(artifact.id.clone(), Arc::new(artifact));
             }
             Event::ArtifactDeleted { id } => {
                 self.artifacts.remove(&id);
@@ -605,7 +671,7 @@ impl Store {
                     .insert((bucket.workspace_id.clone(), bucket.name.clone()), bucket);
             }
             Event::FileUploaded { file, artifact } => {
-                self.artifacts.insert(artifact.id.clone(), artifact);
+                self.artifacts.insert(artifact.id.clone(), Arc::new(artifact));
                 self.files.insert(file.id.clone(), file);
             }
             Event::FileDeleted { id } => {
@@ -618,6 +684,9 @@ impl Store {
             }
             Event::WorkerDeleted { id } => {
                 self.event_workers.remove(&id);
+            }
+            Event::DemoSeeded { payload: event } => {
+                self.demo_event = Some(event);
             }
             Event::WebhookCreated { webhook } => {
                 self.webhooks.insert(webhook.id.clone(), webhook);
@@ -663,24 +732,22 @@ impl Store {
     }
 
     fn project(&self, artifact: &Artifact) -> io::Result<()> {
-        let destination = self
-            .root
-            .join("artifacts")
-            .join(format!("{}.toon", artifact.id));
-        if destination.exists() {
+        self.write_projection(artifact, true)
+    }
+
+    fn write_projection(&self, artifact: &Artifact, durable: bool) -> io::Result<()> {
+        let destination = self.root.join("artifacts").join(format!("{}.toon", artifact.id));
+        let output = crate::toon::encode(&serde_json::to_value(artifact).map_err(io::Error::other)?);
+        if destination.exists() && fs::read(&destination)? == output.as_bytes() {
             return Ok(());
         }
-        let temporary = self
-            .root
-            .join("artifacts")
-            .join(format!("{}.tmp", new_id("projection")));
+        let temporary = self.root.join("artifacts").join(format!("{}.tmp", new_id("projection")));
         let mut file = private_file(&temporary, true)?;
-        let output =
-            crate::toon::encode(&serde_json::to_value(artifact).map_err(io::Error::other)?);
         file.write_all(output.as_bytes())?;
-        file.sync_all()?;
+        if durable { file.sync_all()?; }
         fs::rename(&temporary, &destination)?;
-        sync_dir(&self.root.join("artifacts"))
+        if durable { sync_dir(&self.root.join("artifacts"))?; }
+        Ok(())
     }
 
     fn reproject(&self, artifact: &Artifact) -> io::Result<()> {
@@ -721,7 +788,7 @@ impl Store {
                     "idempotency key reused with different data",
                 ));
             }
-            return Ok(self.artifacts[id].clone());
+            return Ok(self.artifacts[id].as_ref().clone());
         }
         if serde_json::to_vec(&data).map_err(io::Error::other)?.len() > MAX_RECORD_BYTES {
             return Err(io::Error::new(
@@ -774,7 +841,7 @@ impl Store {
         self.artifacts
             .get(id)
             .filter(|a| a.workspace_id == workspace && !Self::is_expired(a, &now))
-            .cloned()
+            .map(|a| a.as_ref().clone())
     }
 
     pub fn is_record_visible(
@@ -941,12 +1008,41 @@ impl Store {
         items: Vec<(Option<String>, Map<String, Value>)>,
     ) -> io::Result<Vec<Artifact>> {
         let mut results = Vec::with_capacity(items.len());
-        for (item_kind, data) in items {
-            let kind = item_kind
-                .or_else(|| default_kind.clone())
-                .unwrap_or_else(|| "records".to_string());
-            let artifact = self.create(workspace, kind, data, None)?;
+        let mut events = Vec::with_capacity(items.len());
+        // Validate and stage everything before writing the single commit frame.
+        for (item_kind, mut data) in items {
+            let kind = item_kind.or_else(|| default_kind.clone()).unwrap_or_else(|| "records".into());
+            if kind.trim().is_empty() || kind.len() > 128 {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid collection name"));
+            }
+            let fingerprint = hex(&Sha256::digest(serde_json::to_vec(&(&kind, &data)).map_err(io::Error::other)?));
+            let now = Utc::now();
+            if let Some(ttl) = data.get("ttl").and_then(Value::as_i64).filter(|ttl| *ttl > 0) {
+                if !data.contains_key("expires_at") {
+                    let expires = chrono::Duration::try_seconds(ttl).and_then(|ttl| now.checked_add_signed(ttl))
+                        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "TTL is out of range"))?;
+                    data.insert("expires_at".into(), Value::String(expires.to_rfc3339()));
+                }
+            }
+            if serde_json::to_vec(&data).map_err(io::Error::other)?.len() > MAX_RECORD_BYTES {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "artifact data exceeds 16 MiB"));
+            }
+            let timestamp = now.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
+            let artifact = Artifact { id: new_id("art"), workspace_id: workspace.into(), kind, data,
+                revision: 1, created_at: timestamp.clone(), updated_at: timestamp };
+            events.push(Event::Artifact { artifact: artifact.clone(), idempotency: None, fingerprint });
             results.push(artifact);
+        }
+        if !events.is_empty() {
+            self.commit(Event::Batch { events })?;
+            // Projections are rebuildable caches. A lost cache write never loses a
+            // committed record; open() validates and repairs projections.
+            for artifact in &results {
+                if self.write_projection(artifact, false).is_err() {
+                    eprintln!("TOON projection pending; it will be repaired on restart");
+                }
+            }
+            let _ = sync_dir(&self.root.join("artifacts"));
         }
         Ok(results)
     }
@@ -1001,79 +1097,66 @@ impl Store {
 
     pub fn list(&self, workspace: &str, kind: Option<&str>) -> Vec<Artifact> {
         let now = Utc::now().to_rfc3339();
-        let mut records: Vec<_> = self
-            .artifacts
-            .values()
+        let mut records: Vec<_> = self.artifacts.values()
             .filter(|a| a.workspace_id == workspace && kind.is_none_or(|k| a.kind == k) && !Self::is_expired(a, &now))
-            .cloned()
             .collect();
-        records.sort_by(|a, b| (&a.created_at, &a.id).cmp(&(&b.created_at, &b.id)));
-        records
+        records.sort_unstable_by(|a, b| (&a.created_at, &a.id).cmp(&(&b.created_at, &b.id)));
+        records.into_iter().map(|a| a.as_ref().clone()).collect()
     }
 
-    pub fn list_visible(
-        &self,
-        workspace: &str,
-        kind: Option<&str>,
-        user_id: Option<&str>,
-    ) -> Vec<Artifact> {
-        let owned_files: BTreeMap<&str, &str> = self
-            .files
-            .values()
-            .filter_map(|file| {
-                file.user_id
-                    .as_deref()
-                    .map(|owner| (file.artifact_id.as_str(), owner))
-            })
-            .collect();
-        self.list(workspace, kind)
-            .into_iter()
-            .filter(|artifact| {
-                self.is_record_visible(artifact, user_id, Some(&owned_files))
-            })
-            .collect()
+    pub fn snapshot_visible(&self, workspace: &str, kind: Option<&str>, user_id: Option<&str>) -> Vec<Arc<Artifact>> {
+        let mut records = self.visible_refs(workspace, kind, user_id);
+        records.sort_unstable_by(|a, b| (&a.created_at, &a.id).cmp(&(&b.created_at, &b.id)));
+        records.into_iter().cloned().collect()
     }
 
-    pub fn search_vectors(
-        &self,
-        workspace: &str,
-        collection: Option<&str>,
-        query_vector: &[f32],
-        top_k: usize,
-        min_score: Option<f32>,
-        user_id: Option<&str>,
-    ) -> Vec<(Artifact, f32)> {
-        let min_score = min_score.unwrap_or(0.0);
-        let mut scored: Vec<(Artifact, f32)> = Vec::new();
-        let records = self.list_visible(workspace, collection, user_id);
+    fn visible_refs(&self, workspace: &str, kind: Option<&str>, user_id: Option<&str>) -> Vec<&Arc<Artifact>> {
+        let now = Utc::now().to_rfc3339();
+        let owned_files: BTreeMap<&str, &str> = self.files.values()
+            .filter_map(|f| f.user_id.as_deref().map(|owner| (f.artifact_id.as_str(), owner))).collect();
+        self.artifacts.values().filter(|a| a.workspace_id == workspace
+            && kind.is_none_or(|k| a.kind == k) && !Self::is_expired(a, &now)
+            && self.is_record_visible(a, user_id, Some(&owned_files))).collect()
+    }
 
-        for record in records {
-            let embedding = record
-                .data
-                .get("embedding")
-                .or_else(|| record.data.get("vector"))
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|x| x.as_f64().map(|f| f as f32))
-                        .collect::<Vec<f32>>()
-                });
+    pub fn list_visible(&self, workspace: &str, kind: Option<&str>, user_id: Option<&str>) -> Vec<Artifact> {
+        self.snapshot_visible(workspace, kind, user_id).into_iter().map(|a| a.as_ref().clone()).collect()
+    }
 
-            if let Some(vec) = embedding {
-                if vec.len() == query_vector.len() {
-                    let score = cosine_similarity(query_vector, &vec);
-                    if score >= min_score {
-                        scored.push((record, score));
-                    }
-                }
+    /// Copy only the requested page; ordering and cursor visibility use references.
+    pub fn page_visible(&self, workspace: &str, kind: Option<&str>, user_id: Option<&str>,
+        anchor: Option<(&str, &str)>, offset: usize, limit: usize) -> Option<(Vec<Artifact>, usize, bool)> {
+        let mut records = self.visible_refs(workspace, kind, user_id);
+        let total = records.len();
+        records.sort_unstable_by(|a, b| (&a.created_at, &a.id).cmp(&(&b.created_at, &b.id)));
+        let start = if let Some((created_at, id)) = anchor {
+            records.iter().position(|a| a.created_at == created_at && a.id == id)? + 1
+        } else { offset.min(total) };
+        let end = start.saturating_add(limit).min(total);
+        Some((records[start..end].iter().map(|a| a.as_ref().clone()).collect(), total, end < total))
+    }
+
+    pub fn search_vectors(&self, workspace: &str, collection: Option<&str>, query_vector: &[f32],
+        top_k: usize, min_score: Option<f32>, user_id: Option<&str>) -> Vec<(Artifact, f32)> {
+        let mut scored = Vec::new();
+        let mut vector = Vec::with_capacity(query_vector.len());
+        for record in self.visible_refs(workspace, collection, user_id) {
+            let Some(embedding) = record.data.get("embedding").or_else(|| record.data.get("vector")).and_then(Value::as_array) else { continue; };
+            if embedding.len() != query_vector.len() { continue; }
+            vector.clear();
+            for value in embedding {
+                let Some(value) = value.as_f64() else { break; };
+                vector.push(value as f32);
+            }
+            if vector.len() == query_vector.len() {
+                let score = cosine_similarity(query_vector, &vector);
+                if score >= min_score.unwrap_or(0.0) { scored.push((record, score)); }
             }
         }
-
-        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        if scored.len() > top_k {
-            scored.truncate(top_k);
-        }
-        scored
+        // Preserve the previous stable tie order (creation time, then ID).
+        scored.sort_unstable_by(|(a, x), (b, y)| y.total_cmp(x).then_with(|| (&a.created_at, &a.id).cmp(&(&b.created_at, &b.id))));
+        scored.truncate(top_k);
+        scored.into_iter().map(|(record, score)| (record.as_ref().clone(), score)).collect()
     }
 
     pub fn conversation(&self, id: &str, owner: &str, workspace: &str) -> Option<Conversation> {
@@ -1222,6 +1305,25 @@ impl Store {
     }
     pub fn event_workers(&self) -> Vec<EventWorker> {
         self.event_workers.values().cloned().collect()
+    }
+    pub fn is_empty(&self) -> io::Result<bool> {
+        Ok(self.journal.metadata()?.len() == 0)
+    }
+    pub fn demo_event(&self) -> Option<Value> {
+        self.demo_event.clone()
+    }
+    pub fn finish_demo_seed(&mut self, event: Value) -> io::Result<()> {
+        self.commit(Event::DemoSeeded { payload: event })
+    }
+    pub fn event_worker(&self, id: &str) -> Option<EventWorker> {
+        self.event_workers.get(id).cloned()
+    }
+    pub fn update_event_worker(&mut self, id: &str, event_name: Option<String>, source: Option<String>) -> io::Result<Option<EventWorker>> {
+        let Some(mut worker) = self.event_worker(id) else { return Ok(None); };
+        if let Some(event_name) = event_name { worker.event_name = event_name; }
+        if let Some(source) = source { worker.source = source; }
+        self.commit(Event::WorkerCreated { worker: worker.clone() })?;
+        Ok(Some(worker))
     }
     pub fn webhooks(&self) -> Vec<Webhook> {
         self.webhooks.values().cloned().collect()
@@ -1470,7 +1572,7 @@ impl Store {
                     serde_json::to_vec(&(&artifact.kind, &artifact.data)).unwrap_or_default(),
                 ));
                 Self::write_entry(&mut new_journal, Event::Artifact {
-                    artifact: artifact.clone(),
+                    artifact: artifact.as_ref().clone(),
                     idempotency: None,
                     fingerprint,
                 })?;
@@ -1482,7 +1584,7 @@ impl Store {
             if let Some(artifact) = self.artifacts.get(&file.artifact_id) {
                 Self::write_entry(&mut new_journal, Event::FileUploaded {
                     file: file.clone(),
-                    artifact: artifact.clone(),
+                    artifact: artifact.as_ref().clone(),
                 })?;
             }
         }
@@ -1490,6 +1592,9 @@ impl Store {
         // 8. Write event workers & webhooks
         for worker in self.event_workers.values() {
             Self::write_entry(&mut new_journal, Event::WorkerCreated { worker: worker.clone() })?;
+        }
+        if let Some(event) = &self.demo_event {
+            Self::write_entry(&mut new_journal, Event::DemoSeeded { payload: event.clone() })?;
         }
         for webhook in self.webhooks.values() {
             Self::write_entry(&mut new_journal, Event::WebhookCreated { webhook: webhook.clone() })?;

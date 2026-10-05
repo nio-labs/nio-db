@@ -29,7 +29,7 @@ function loadSettings(args) {
 }
 
 async function firstRun(args, acceptDefaults) {
-  const directory = option(args, '--dir') || process.env.NIODB_DIR || './niodb';
+  const directory = option(args, '--dir') || process.env.NIODB_DIR || './nio-db';
   const customAuth = option(args, '--auth-file') || process.env.NIODB_AUTH_FILE;
   if (customAuth || existsSync(join(resolve(directory), 'auth.json'))) return;
   if (acceptDefaults) return;
@@ -105,7 +105,7 @@ function startupCommand(args) {
       if (args[++index] === undefined) return false;
     } else if (['--help', '-h', '--version', '-V'].includes(arg)) {
       return false;
-    } else if (arg === '--include-files') {
+    } else if (['--include-files', '--seed-demo', '--no-demo'].includes(arg)) {
       continue;
     } else if (['serve', 'init-auth', 'add-secret', 'backup', 'mcp'].includes(arg)) {
       if (arg !== 'serve') command = arg;
@@ -182,7 +182,7 @@ function tokenMatchesAuth(authPath, tokenPath) {
 }
 
 function bootstrapAuth(binary, args) {
-  const data = resolve(option(args, '--dir') || process.env.NIODB_DIR || 'niodb');
+  const data = resolve(option(args, '--dir') || process.env.NIODB_DIR || 'nio-db');
   const customAuth = option(args, '--auth-file') || process.env.NIODB_AUTH_FILE;
   const auth = customAuth ? resolve(customAuth) : join(data, 'auth.json');
   const clientPath = join(data, 'client-token');
@@ -228,7 +228,7 @@ function bootstrapAuth(binary, args) {
 
 async function runMcpStdio(args) {
   loadSettings(args);
-  const directory = resolve(option(args, '--dir') || process.env.NIODB_DIR || './niodb');
+  const directory = resolve(option(args, '--dir') || process.env.NIODB_DIR || './nio-db');
   const tokenPath = join(directory, 'client-token');
   const secretPath = join(directory, 'secret-token');
   let token = process.env.NIODB_TOKEN;
@@ -317,7 +317,7 @@ async function main() {
       encoding: 'utf8', timeout: 10000, maxBuffer: 8192, stdio: ['ignore', 'pipe', 'pipe']
     }).trim();
     if (!/^niodb_secret_[a-f0-9]{64}$/.test(token)) throw new Error('Secret rotation returned an invalid token.');
-    const data = resolve(option(args, '--dir') || process.env.NIODB_DIR || 'niodb');
+    const data = resolve(option(args, '--dir') || process.env.NIODB_DIR || 'nio-db');
     replaceToken(join(data, 'secret-token'), token);
     process.stdout.write(token + '\n');
     return;

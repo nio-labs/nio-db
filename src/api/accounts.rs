@@ -40,7 +40,7 @@ fn derive(password: &str, salt: &[u8]) -> [u8; 32] {
     pbkdf2::pbkdf2::<Hmac<Sha256>>(password.as_bytes(), salt, ROUNDS, &mut output);
     output
 }
-fn hash_password(password: &str) -> String {
+pub(super) fn hash_password(password: &str) -> String {
     let mut salt = [0u8; 16];
     OsRng.fill_bytes(&mut salt);
     format!(

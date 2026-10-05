@@ -66,6 +66,20 @@ pub(super) struct CreateWebhook {
     url: String,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct UpdateWorker {
+    #[serde(alias = "event_type")]
+    event_name: Option<String>,
+    source: Option<String>,
+}
+
+fn worker_detail(worker: &EventWorker) -> Value {
+    let mut value = public_worker(worker);
+    value["source"] = json!(worker.source);
+    value
+}
+
 fn public_worker(worker: &EventWorker) -> Value {
     json!({"id":worker.id,"event_name":worker.event_name,"created_at":worker.created_at,"created_by":worker.created_by})
 }
@@ -111,9 +125,16 @@ pub(super) async fn stream(
     }
     let filter = filter.filter(|name| name != "*");
     let receiver = app.events.subscribe();
-    let stream = stream::unfold((receiver, filter), |(mut receiver, filter)| async move {
+    let initial = storage(&app, &id, |store| Ok(store.demo_event())).await?
+        .filter(|event| filter.as_ref().is_none_or(|name| event["name"].as_str() == Some(name)));
+    let demo_id = initial.as_ref().and_then(|event| event["id"].as_str()).map(str::to_owned);
+    let stream = stream::unfold((receiver, filter, initial, demo_id), |(mut receiver, filter, mut initial, demo_id)| async move {
+        if let Some(event) = initial.take() {
+            return Some((Ok(SseEvent::default().event("message").data(event.to_string())), (receiver, filter, initial, demo_id)));
+        }
         loop {
             match receiver.recv().await {
+                Ok(value) if demo_id.as_deref().is_some_and(|id| value["id"].as_str() == Some(id)) => continue,
                 Ok(value)
                     if filter
                         .as_ref()
@@ -124,7 +145,7 @@ pub(super) async fn stream(
                 Ok(value) => {
                     return Some((
                         Ok(SseEvent::default().event("message").data(value.to_string())),
-                        (receiver, filter),
+                        (receiver, filter, initial, demo_id),
                     ));
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
@@ -132,7 +153,7 @@ pub(super) async fn stream(
                         Ok(SseEvent::default()
                             .event("gap")
                             .data(json!({"missed":count}).to_string())),
-                        (receiver, filter),
+                        (receiver, filter, initial, demo_id),
                     ));
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
@@ -190,8 +211,13 @@ pub(super) async fn publish(
         recent.push_back(Instant::now());
     }
     let event = json!({"id":new_id("evt"),"name":body.name,"data":body.data,"actor":principal.name,"created_at":chrono::Utc::now().to_rfc3339()});
+    dispatch_event(&app, &id, event.clone()).await?;
+    Ok((StatusCode::ACCEPTED, Json(event)))
+}
+
+pub(super) async fn dispatch_event(app: &App, id: &RequestId, event: Value) -> Result<(), ApiError> {
     let name = event["name"].as_str().unwrap().to_owned();
-    let (workers, webhooks) = storage(&app, &id, move |store| {
+    let (workers, webhooks) = storage(app, id, move |store| {
         Ok((
             store
                 .event_workers()
@@ -221,7 +247,7 @@ pub(super) async fn publish(
             send_webhook(webhook, event).await;
         });
     }
-    Ok((StatusCode::ACCEPTED, Json(event)))
+    Ok(())
 }
 
 async fn run_worker(
@@ -363,6 +389,38 @@ pub(super) async fn create_worker(
     let result = public_worker(&worker);
     storage(&app, &id, move |store| store.create_event_worker(worker)).await?;
     Ok((StatusCode::CREATED, Json(result)))
+}
+
+pub(super) async fn worker(
+    State(app): State<App>,
+    Extension(id): Extension<RequestId>,
+    session: Option<Extension<accounts::SessionIdentity>>,
+    Path(worker_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    admin(session, &id)?;
+    let worker = storage(&app, &id, move |store| Ok(store.event_worker(&worker_id))).await?
+        .ok_or_else(|| error(&id, StatusCode::NOT_FOUND, "not_found", "Event worker not found"))?;
+    Ok(Json(worker_detail(&worker)))
+}
+
+pub(super) async fn update_worker(
+    State(app): State<App>,
+    Extension(id): Extension<RequestId>,
+    session: Option<Extension<accounts::SessionIdentity>>,
+    Path(worker_id): Path<String>,
+    body: Result<Json<UpdateWorker>, JsonRejection>,
+) -> Result<Json<Value>, ApiError> {
+    admin(session, &id)?;
+    let body = body.map_err(|r| body_error(&id, r))?.0;
+    if (body.event_name.is_none() && body.source.is_none())
+        || body.event_name.as_ref().is_some_and(|name| !valid_name(name, true))
+        || body.source.as_ref().is_some_and(|source| source.trim().is_empty() || source.len() > 32 * 1024)
+    {
+        return Err(error(&id, StatusCode::BAD_REQUEST, "invalid_worker", "Provide a valid event name or up to 32 KiB of nonempty TypeScript source"));
+    }
+    let worker = storage(&app, &id, move |store| store.update_event_worker(&worker_id, body.event_name, body.source)).await?
+        .ok_or_else(|| error(&id, StatusCode::NOT_FOUND, "not_found", "Event worker not found"))?;
+    Ok(Json(worker_detail(&worker)))
 }
 
 pub(super) async fn delete_worker(

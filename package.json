@@ -27,6 +27,9 @@
     "check:py": "python3 -m unittest discover -s packages/nio-db-py/tests",
     "test": "npm run check:launcher && npm run check:sql && npm run check:sdk",
     "benchmark": "node scripts/simulate-and-benchmark.cjs",
+    "benchmark:sqlite": "node scripts/simulate-and-benchmark.cjs --sqlite",
+    "seed:extras": "node scripts/seed-events-users.cjs",
+    "seed:handlers": "node scripts/seed-event-handlers.cjs",
     "publish:all": "node scripts/publish-all.cjs"
   },
   "dependencies": {

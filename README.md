@@ -21,7 +21,7 @@ NioDB is a standalone Rust server. Nio and web/mobile applications connect over 
 **Contents**
 
 - [Current implementation](#current-implementation)
-- [☁️ 1-Click Cloud Deployment](#️-1-click-cloud-deployment)
+- [Cloud deployment](#cloud-deployment)
   - [1-Click Deploy to Railway](#1-click-deploy-to-railway)
   - [1-Click Deploy to Koyeb](#1-click-deploy-to-koyeb)
 - [1-Command Self-Hosting with Docker](#1-command-self-hosting-with-docker)
@@ -29,24 +29,28 @@ NioDB is a standalone Rust server. Nio and web/mobile applications connect over 
 - [CLI and first-run setup](#cli-and-first-run-setup)
   - [Run from source now](#run-from-source-now)
 - [API examples](#api-examples)
-  - [Guides & Interactive Docs](#guides)
+  - [Guides](#guides)
+  - [Interactive documentation](#interactive-documentation)
   - [SQL surface](#sql-surface)
   - [Row-Level Security (RLS)](#row-level-security-rls)
   - [Model Context Protocol (MCP) for Coding Agents](#model-context-protocol-mcp-for-coding-agents)
+  - [Starter demos](#starter-demos)
 - [App authentication](#app-authentication)
 - [Files and buckets](#files-and-buckets)
-- [Live events, workers and webhooks](#live-events-workers-and-webhooks)
-- [Chat, intelligence and SQL](#chat-intelligence-and-sql)
-- [Backup and recovery](#backup-and-recovery)
+- [Live events and webhooks](#live-events-and-webhooks)
+- [Chat with Nio](#chat-with-nio)
+- [Nio skills and plugins](#nio-skills-and-plugins)
+- [Storage and backup](#storage-and-backup)
 - [Web Console Dashboard](#web-console-dashboard)
 - [Client SDKs](#client-sdks)
+- [Benchmark](#benchmark)
 - [Initial limits](#initial-limits)
 - [Packaging and release](#packaging-and-release)
 - [License](#license)
 
 ---
 
-## ☁️ 1-Click Cloud Deployment
+## Cloud deployment
 
 Deploy your personal, 100% agentic NioDB instance to the cloud in one click:
 
@@ -98,13 +102,13 @@ If native Nio CLI is uninstalled or unconfigured, NioDB automatically activates 
 
 ## CLI and first-run setup
 
-The published entry point will be:
+The npm CLI entry point is:
 
 ```sh
 npx @nio-labs/nio-db
 ```
 
-On the first launch in a folder, the CLI asks only for a data directory. Press Enter to accept `./niodb`. Each server has one workspace; there is no workspace ID to enter or pass to the API. The server uses `127.0.0.1:7432` automatically; use `--listen` or `NIODB_LISTEN` to override it. It detects an installed native Nio on PATH or in `~/.local/bin`. If Nio is missing, the pinned `@nio-labs/nio-ai` launcher downloads its checksummed native binary into its versioned user cache. No global npm install is needed.
+On the first launch in a folder, the CLI asks only for a data directory. Press Enter to accept `./nio-db`. Each server has one workspace; there is no workspace ID to enter or pass to the API. The server uses `127.0.0.1:7432` automatically; use `--listen` or `NIODB_LISTEN` to override it. It detects an installed native Nio on PATH or in `~/.local/bin`. If Nio is missing, the pinned `@nio-labs/nio-ai` launcher downloads its checksummed native binary into its versioned user cache. No global npm install is needed.
 
 Setup creates two bearer credentials, a **client token** and a **secret**, and writes them privately to `DATA_DIR/client-token` and `DATA_DIR/secret-token`. Only their SHA-256 hashes are stored in `auth.json`. Both currently have full backend access and use `Authorization: Bearer TOKEN`. The names describe intended use, not separate permissions: neither token is safe to embed in a public web or mobile app. Use an app-user session there instead. The CLI saves the directory and address in `.nio-db.json` in the current folder. Existing `dev-token` credentials are preserved as the client token and receive a new secret on the next launch. Provider/model configuration remains a Nio task.
 
@@ -114,7 +118,7 @@ For scripts, provision credentials with `init-auth`, or pass `--yes` to accept f
 
 ### Run from source now
 
-Requires Rust 1.89+ and Node 18+. The npm packages are not published yet.
+Requires Rust 1.89+ and Node 18+.
 
 ```sh
 npm install --omit=optional
@@ -122,23 +126,23 @@ cargo build --release --locked
 node bin/niodb.cjs
 ```
 
-This launches the same first-run flow. If this folder already contains `niodb/auth.json`, it starts directly with those credentials. Source installs omit the unpublished platform packages and use the locally built release binary.
+This launches the same first-run flow. If this folder already contains `nio-db/auth.json`, it starts directly with those credentials. `--omit=optional` skips the platform binary packages; the launcher uses the locally built release binary.
 
 For explicit credential provisioning:
 
 ```sh
-node bin/niodb.cjs init-auth --dir ./niodb --name app
+node bin/niodb.cjs init-auth --dir ./nio-db --name app
 ```
 
-`init-auth` prints JSON with `client_token` and `secret_token` once and refuses to overwrite an existing credential file. Store both securely; the server stores only their SHA-256 hashes. First-run setup captures them into private token files instead of printing them. Use `node bin/niodb.cjs add-secret --dir ./niodb` to add or rotate the secret on an existing credential file; the launcher updates `secret-token` and prints the new secret once. Restart a running server after changing credentials.
+`init-auth` prints JSON with `client_token` and `secret_token` once and refuses to overwrite an existing credential file. Store both securely; the server stores only their SHA-256 hashes. First-run setup captures them into private token files instead of printing them. Use `node bin/niodb.cjs add-secret --dir ./nio-db` to add or rotate the secret on an existing credential file; the launcher updates `secret-token` and prints the new secret once. Restart a running server after changing credentials.
 
-Run `node bin/niodb.cjs --help` for configuration flags. Publication and the full platform build matrix remain outstanding. The Nio dependency/automatic download path still needs verification with the registry-installed package; shell registry access is blocked in this workspace.
+Run `node bin/niodb.cjs --help` for configuration flags.
 
 NioDB checks CLI compatibility, configured model and enabled capability catalogs at startup. Configure Nio through its CLI and restart NioDB after changes. If installed only in the managed cache, the startup output shows its executable path; `npx @nio-labs/nio-ai` also uses that versioned cache. `NIO_CONFIG` selects the source Nio configuration. Ready means compatible and configured, rather than a successful provider request. Core record operations remain available when Nio or AlaSQL is unavailable.
 
 ## API examples
 
-For a local shell, load either stored token without printing it: `NIODB_TOKEN=$(cat ./niodb/client-token)`. The secret is in `./niodb/secret-token`. Both have full backend access.
+For a local shell, load either stored token without printing it: `NIODB_TOKEN=$(cat ./nio-db/client-token)`. The secret is in `./nio-db/secret-token`. Both have full backend access.
 
 ```sh
 curl http://127.0.0.1:7432/health
@@ -159,11 +163,19 @@ curl http://127.0.0.1:7432/api/v1/assist \
   -d '{"message":"What tasks are pending?"}'
 ```
 
-Use the returned `conversation_id` for follow-up questions. Conversations belong to the authenticated principal and workspace. Each response has `X-Request-ID`; errors contain the same identifier. Public routes are `/health`, `/docs/`, `/doc`, `/openapi.yaml`, and POST `/auth/login` (also `/api/v1/auth/login`). All other routes require a bearer token. Remote deployments should use an HTTPS reverse proxy and persistent server storage.
+Use the returned `conversation_id` for follow-up questions. Conversations belong to the authenticated principal and workspace. Each response has `X-Request-ID`; errors contain the same identifier. Public routes are `/health`, `/guide`, `/doc`, `/openapi.yaml`, and POST `/auth/login` (also `/api/v1/auth/login`). All other routes require a bearer token. Remote deployments should use an HTTPS reverse proxy and persistent server storage.
+
+### Starter demos
+
+A new database includes one welcome record, one `niodb_demo` user, one `welcome.txt` file, one TypeScript worker using `fetch()` against `/health`, and one `demo.ping` event. File storage also creates a file metadata record. The random demo password is saved privately in `<data-directory>/demo-user.json`.
+
+Demos are created once and are not duplicated or recreated after deletion. The starter event appears on SSE connection; other events remain live without replay. Publish `demo.ping` to run the worker again. Workers require Node 22+ with TypeScript stripping support.
+
+Existing databases are preserved. Start with `--seed-demo` to add examples once, or run `NIODB_SEED_DEMO=1 node scripts/dev.cjs` during development. For a new database without demos, use `--no-demo` or `NIODB_NO_DEMO=1`.
 
 ### Guides
 
-Open [http://127.0.0.1:7432/docs/](http://127.0.0.1:7432/docs/) for detailed setup, token and user flows, records and collections, SQL, Nio assistance, files, chat, live events, workers, webhooks, capabilities, backup and current limits. It includes copyable requests, response shapes and permission rules. The page is embedded in the Rust executable and needs no separate documentation process. Google Sans Code loads from Google Fonts when the browser has internet access, with a system font fallback. `/docs` redirects to `/docs/`; the guide links to the interactive API reference at `/doc`.
+Open [http://127.0.0.1:7432/guide](http://127.0.0.1:7432/guide) for detailed setup, token and user flows, records and collections, SQL, Nio assistance, files, chat, live events, workers, webhooks, capabilities, backup and current limits. It includes copyable requests, response shapes and permission rules. The page is embedded in the Rust executable and needs no separate documentation process. Google Sans Code loads from Google Fonts when the browser has internet access, with a system font fallback. `/docs` and `/docs/` redirect to `/guide`; the guide links to the interactive API reference at `/doc`.
 
 ### Interactive documentation
 
@@ -175,7 +187,7 @@ The page is embedded in the Rust executable; its version-pinned Swagger UI JavaS
 
 The main API uses **records** grouped by **collection**. For example, create a record in the `tasks` collection with `POST /api/v1/records` and `{ "collection": "tasks", "data": { "title": "Review API" } }`. List with `GET /api/v1/records?collection=tasks` and read with `GET /api/v1/records/{id}`. Existing `/api/v1/artifacts` routes remain as compatible aliases; they use `type` instead of `collection` in responses.
 
-Safe collection names become SQL tables. The legacy `artifacts` SQL table contains every authorized record. The `files` collection is managed exclusively by the storage API. Top-level data fields are flattened. Reserved server fields `id`, `type`, `revision`, `created_at`, and `updated_at` override colliding data fields.
+Safe collection names become SQL tables. The `records` and legacy `artifacts` SQL tables contain every authorized record. The `files` collection is managed exclusively by the storage API. Top-level data fields are flattened. Reserved server fields `id`, `collection`, `type`, `revision`, `created_at`, and `updated_at` override colliding data fields.
 
 Record CRUD supports complete **Create** (`POST /api/v1/records`), **Read** (`GET /api/v1/records` to list, or `GET /api/v1/records/{id}` to fetch one), **Update** (`PATCH` or `PUT /api/v1/records/{id}`), **Delete** (`DELETE /api/v1/records/{id}`), **Bulk** operations (`POST /api/v1/records/bulk`), **Vector Similarity Search** (`POST /api/v1/records/search`), and **Real-time Live Watch** (`GET /api/v1/records/watch?collection=...` via SSE).
 
@@ -208,7 +220,7 @@ Natural-language queries use `POST /api/v1/assist` with a `message` and optional
 
 ## App authentication
 
-Your backend creates users with its secret or client token. Browser/mobile clients log in using username and password; they receive their own seven-day bearer session. Sessions and logout revocation persist across restart. All authenticated users share general records and buckets. Chat conversations belong to their individual user identity. Keep both backend tokens off public clients; either can register and delete users, while user sessions cannot.
+Your backend creates users with its secret or client token. Browser/mobile clients log in using username and password; they receive their own seven-day bearer session. Sessions and logout revocation persist across restart. Users can access their own records and public records; file ownership rules apply to buckets. Chat conversations belong to their individual user identity. Keep both backend tokens off public clients; either can register and delete users, while user sessions cannot.
 
 ```sh
 # Backend provisions an account using NIODB_TOKEN.
@@ -229,7 +241,7 @@ curl -X DELETE http://127.0.0.1:7432/api/v1/auth/users/USER_ID \
   -H "Authorization: Bearer $NIODB_TOKEN"
 ```
 
-The versioned equivalents are `/api/v1/auth/register`, `/login`, `/me`, and `/logout`. Usernames are trimmed and lowercased, with 3–64 ASCII letters, digits, dots, hyphens or underscores. Registration passwords must be 12–1024 UTF-8 bytes. Password storage uses the cached RustCrypto PBKDF2 implementation with HMAC-SHA256, 600,000 rounds, random 16-byte salts and constant-time comparisons, following the PBKDF2 work factor in [OWASP's password storage guidance](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html). Argon2 is not currently available in the offline build environment. Tokens are random opaque values; only their SHA-256 hashes are journaled. There are no default username/password accounts, cookie sessions, password reset, email verification, refresh tokens or general record ACLs in this initial contract. Deleting a user revokes their sessions and removes their linked files and chat histories; shared files and general records remain.
+The versioned equivalents are `/api/v1/auth/register`, `/login`, `/me`, and `/logout`. Usernames are trimmed and lowercased, with 3–64 ASCII letters, digits, dots, hyphens or underscores. Registration passwords must be 12–1024 UTF-8 bytes. Password storage uses the cached RustCrypto PBKDF2 implementation with HMAC-SHA256, 600,000 rounds, random 16-byte salts and constant-time comparisons, following the PBKDF2 work factor in [OWASP's password storage guidance](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html). Argon2 is not currently available in the offline build environment. Tokens are random opaque values; only their SHA-256 hashes are journaled. New databases include a demo user with a randomly generated password saved privately in `demo-user.json`. There are no shared default passwords, cookie sessions, password reset, email verification, refresh tokens or general record ACLs in this initial contract. Deleting a user revokes their sessions and removes their linked files and chat histories; shared files and general records remain.
 
 For a web app on another origin, set an exact comma-separated allowlist before starting:
 
@@ -310,7 +322,7 @@ for (;;) {
 }
 ```
 
-The backend credential can register up to 32 TypeScript workers and 32 webhooks. Each registration chooses an exact event name or `*`. Workers run asynchronously in a separate Node process with the published event as their only function argument. They require Node 22+ and an `export default` function using TypeScript syntax supported by Node's built-in type stripping. Worker source is trusted administrator code with the server process's privileges, so only a trusted backend should register it. A worker has a five-second time limit, a 64 MiB Node heap limit and two execution slots. Event publishing does not wait for it. Worker stdout and stderr are discarded; failures appear as a short server log entry.
+The backend credential can register up to 64 TypeScript workers and 64 webhooks. Each registration chooses an exact event name or `*`. Workers run asynchronously in a separate Node process with the published event as their only function argument. They require Node 22+ and an `export default` function using TypeScript syntax supported by Node's built-in type stripping. Worker source is trusted administrator code with the server process's privileges, so only a trusted backend should register it. A worker has a five-second time limit, a 64 MiB Node heap limit and two execution slots. Event publishing does not wait for it. Worker stdout and stderr are discarded; failures appear as a short server log entry.
 
 ```sh
 curl http://127.0.0.1:7432/api/v1/events/workers \
@@ -322,7 +334,7 @@ curl http://127.0.0.1:7432/api/v1/webhooks \
   -d '{"event_name":"orders.created","url":"https://example.com/niodb-events"}'
 ```
 
-Webhook creation returns a random `secret` once. Keep it on the receiving server. Each POST sends the event JSON with `X-NioDB-Event`, `X-NioDB-Delivery` and `X-NioDB-Signature: sha256=<hex HMAC-SHA256>`; the HMAC key is the returned secret string, applied to the exact request body. Delivery has a five-second timeout, no redirects, and up to three attempts while the server runs. Only HTTPS targets are accepted, except HTTP loopback for local development. A published event is accepted before worker/webhook completion, and failures are logged; delivery is not durable. Use `GET` and `DELETE` on `/api/v1/events/workers` or `/api/v1/webhooks` (with `/:id` for deletion) to manage registrations. Worker source and webhook secrets are stored in the private journal and omitted from list responses.
+Webhook creation returns a random `secret` once. Keep it on the receiving server. Each POST sends the event JSON with `X-NioDB-Event`, `X-NioDB-Delivery` and `X-NioDB-Signature: sha256=<hex HMAC-SHA256>`; the HMAC key is the returned secret string, applied to the exact request body. Delivery has a five-second timeout, no redirects, and up to three attempts while the server runs. Only HTTPS targets are accepted, except HTTP loopback for local development. A published event is accepted before worker/webhook completion, and failures are logged; delivery is not durable. Use `GET` and `DELETE` on `/api/v1/events/workers` or `/api/v1/webhooks` (with `/:id` for deletion) to manage registrations. Workers also support `GET /api/v1/events/workers/:id` for source details and `PATCH /api/v1/events/workers/:id` to update the event name or source. See the [worker examples in the guide](http://127.0.0.1:7432/guide#workers) for REST `fetch()` integrations. Worker source and webhook secrets are stored in the private journal and omitted from list responses.
 
 ## Chat with Nio
 
@@ -341,7 +353,7 @@ Only `message` is required. `fields` is an optional JSON object with app context
 Grant capability names when provisioning credentials:
 
 ```sh
-node bin/niodb.cjs init-auth --dir ./niodb \
+node bin/niodb.cjs init-auth --dir ./nio-db \
   --name app --skill research --plugin pdf
 ```
 
@@ -353,12 +365,12 @@ Each Nio invocation uses an isolated directory and configuration, `--mode ask --
 
 ## Storage and backup
 
-`journal.jsonl` is the recovery authority. TOON files in `artifacts/` are derived, human-readable projections using a basic encoder. They are not an editable database interface; TOON decoding/import and full codec conformance are future work. Missing projections are regenerated at startup. Existing projections are not validated against the journal.
+`journal.jsonl` is the recovery authority. TOON files in `artifacts/` are derived, human-readable projections using a basic encoder. They are not an editable database interface; TOON decoding/import and full codec conformance are future work. Missing or mismatched projections are regenerated from the journal at startup.
 
 One server owns a data directory. Stop it before taking an offline backup:
 
 ```sh
-node bin/niodb.cjs backup --dir ./niodb --output ./backup.jsonl
+node bin/niodb.cjs backup --dir ./nio-db --output ./backup.jsonl
 ```
 
 The journal-only command acquires the same exclusive lock and refuses to overwrite the destination. **If you have uploaded files, use the full backup below**; a journal alone cannot restore blobs. To restore a journal-only database with no files, stop the server, create a fresh private directory, copy the backup to `journal.jsonl`, and copy the separately backed-up `auth.json` or provision fresh credentials. Start the server against that directory. Do not overwrite a running or existing database journal. Nio provider configuration is managed separately from database backups.
@@ -370,7 +382,7 @@ An incomplete final journal record is truncated on recovery. Complete corrupt re
 Stop the server, then run:
 
 ```sh
-node bin/niodb.cjs backup --dir ./niodb --include-files --output ./niodb-backup
+node bin/niodb.cjs backup --dir ./nio-db --include-files --output ./nio-db-backup
 ```
 
 The destination must be a new directory. It contains the consistent journal and every referenced blob; the source directory's exclusive lock stays held during the copy. Copy your separately backed-up backend `auth.json` into a restored directory, or provision fresh backend credentials. To restore, copy the backup directory to a new private data directory and start against it. It recreates TOON projections and verifies blob hashes. Password hashes and app sessions are in the journal, so treat backups as private. Provider configuration is separate. Do not restore while a server is running.
@@ -394,13 +406,43 @@ NioDB provides zero-dependency, ultra-lightweight client SDKs:
 - **TypeScript / JavaScript**: [`@nio-labs/nio-db.js`](packages/nio-db.js) (< 8 KB, browser, Node.js, Bun, Deno, React Native).
 - **Python**: [`nio-db-py`](packages/nio-db-py) (zero dependencies, typed, Python 3.8+).
 
+## Benchmark
+
+Measured on **2026-10-05** with release builds on WSL2 Linux, an Intel Core Ultra 5 135H, 18 logical CPUs, 7.22 GiB RAM, Node 24.18.1, and an ext4 filesystem. The same authenticated loopback HTTP runner sent one request at a time to each server. It parsed every response and verified record counts, SQL results, and the SHA-256 hashes of four file downloads. The fixture contains 10,000 records: 5,000 telemetry, 3,000 customers, and 2,000 with 8-dimensional vectors, plus four file metadata records. Inserts use 20 transactions of 500 records. SQL uses two grouped aggregates and one sorted query. Reported read latencies include 20, 5, 5, and 3 warm-up requests for lookups, scans, vectors, and SQL, respectively.
+
+| Operation | NioDB before changes | NioDB current | SQLite adapter |
+| --- | ---: | ---: | ---: |
+| Bulk ingestion, records/s | 324 | 13,311 | 29,808 |
+| Bulk batch P50, 500 records | 1,535 ms | 37.6 ms | 16.0 ms |
+| Record lookup by ID P50 | 2.15 ms | 1.92 ms | 1.88 ms |
+| Collection scan P50, 5,000 records, return 50 | 11.53 ms | 4.15 ms | 2.83 ms |
+| Vector search P50, 2,000 × 8D, top 10 | 5.67 ms | 3.33 ms | 7.09 ms |
+| SQL P50, grouped aggregates and sorted query | 274.28 ms | 31.41 ms | 2.67 ms |
+
+The **before** and **current** NioDB columns ran the same benchmark script and fixture. The SQLite column uses a small Rust/Axum HTTP adapter in [src/bin/sqlite-benchmark.rs](src/bin/sqlite-benchmark.rs), with SQLite 3.46.1. It stores records in SQLite tables, uses `WAL` and `synchronous=FULL`, and commits each 500-record batch in one transaction. [SQLite documents](https://sqlite.org/pragma.html#pragma_synchronous) that this setting syncs the WAL after each transaction commit. The adapter computes exact vector similarity in Rust after scanning the SQLite rows; SQLite itself has no vector extension in this test. The adapter executes only the three measured SQL queries, using typed SQLite tables. These are **HTTP application comparisons**, not raw embedded SQLite timings or a claim that every feature has equivalent implementation. Event publishing is excluded from the comparison because the adapter only acknowledges an in-memory event and does not implement NioDB's worker, webhook, or SSE behavior. Neither server had event handlers or subscribers during the measured workload.
+
+NioDB's current ingestion rate is about **41×** its previous rate in this run. The journal now commits each validated bulk batch as one checksummed frame and syncs once. One warm AlaSQL worker serves repeated SQL requests; a second starts on concurrent demand. Paged reads and vector search copy selected results rather than the entire workspace. NioDB's server RSS after SQL was **38.26 MiB**, plus **93.79 MiB** for its warm SQL worker; combined proportional set size after two idle seconds was **96.01 MiB**. SQLite adapter RSS after SQL was **12.30 MiB**, with **9.85 MiB** proportional set size. RSS snapshots are not peak memory, and process memory accounting varies by environment.
+
+Natural-language/LLM requests, password hashing, concurrent clients, and remote network latency are outside this benchmark. Hardware, filesystem, cache state, and background activity can change the figures. See the complete [NioDB report](benchmarks/latest.json), [previous NioDB report](benchmarks/baseline-profile.json), and [SQLite report](benchmarks/sqlite.json).
+
+### Reproduce
+
+```sh
+cargo build --release --locked
+npm run benchmark
+cargo build --release --locked --features sqlite-benchmark --bin sqlite-benchmark
+npm run benchmark:sqlite
+```
+
+The runner creates and removes a separate temporary database on the repository filesystem; it does not modify your normal `nio-db` directory. It uses port 7488; set `NIODB_BENCHMARK_PORT` to use another port. Override either report path with `NIODB_BENCHMARK_OUTPUT`.
+
 ## Initial limits
 
 | Resource | Limit |
 | --- | --- |
-| Journal | 128 MiB; no compaction yet |
+| Journal | 64 GiB; vacuum compaction supported |
 | Record data / HTTP body | 256 KiB / 300 KiB |
-| SQL input / workspace records / serialized input | 8 KiB / 5,000 / 8 MiB |
+| SQL input / workspace records / serialized input | 64 KiB / 500,000 / 64 MiB |
 | SQL results / timeout / JS heap | 200 rows / 5 seconds / 64 MiB |
 | SQL processes / assistance requests | 2 / 2 concurrent |
 | Nio invocation | 60 seconds by default; configurable 1–300 |
@@ -413,10 +455,10 @@ NioDB provides zero-dependency, ultra-lightweight client SDKs:
 | Login attempts / concurrent password operations | 30 per minute per server / 2 |
 | Event data / live stream buffer | 16 KiB / 256 messages |
 | Event publish rate | 100 per second per server |
-| Worker / webhook registrations | 32 each |
+| Worker / webhook registrations | 64 each |
 | Worker / webhook concurrency | 2 / 8 |
 
-Journal state is loaded into memory and reads scan records. The Node runtime needed by AlaSQL contributes to the deployment footprint; this is not a Rust-only executable deployment. Mutations through Nio, plugin execution, automatic file-content extraction, durable event replay, GraphQL, chat streaming, indexes, compaction and dashboards are planned work.
+Journal state is loaded into memory; collection scans sort visible record references and copy the returned page. The Node runtime needed by AlaSQL contributes to the deployment footprint. Mutations through Nio, plugin execution, automatic file-content extraction, durable event replay, GraphQL, chat streaming, and secondary indexes are planned work. Vacuum compaction and the administration console are implemented.
 
 ## Packaging and release
 

@@ -346,7 +346,7 @@
   <header>
     <div class="top">
       <div class="brand-wrap">
-        <a class="brand" href="/docs/">
+        <a class="brand" href="/guide">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-teal-600"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
           NioDB
         </a>
@@ -372,6 +372,7 @@
       <a href="#quickstart">Quickstart & Install</a>
       <a href="#sdks">Client SDKs (JS & Py)</a>
       <a href="#tokens">Authentication & Tokens</a>
+      <a href="#demo">Starter Demo</a>
 
       <strong>Data & Search</strong>
       <a href="#records">Records & Collections</a>
@@ -389,6 +390,7 @@
       <strong>Storage & Events</strong>
       <a href="#files">Files & Blob Storage</a>
       <a href="#events">Live SSE & Webhooks</a>
+      <a href="#workers">TypeScript Workers</a>
       <a href="#users">Users & Sessions</a>
       <a href="#vacuum">Storage Compaction (Vacuum)</a>
       <a href="#reference">Resource Limits Table</a>
@@ -396,7 +398,7 @@
 
     <!-- MAIN BODY -->
     <main>
-      <h1>NioDB Documentation</h1>
+      <h1>NioDB Guide</h1>
       <p class="lead">The Agentic DB that works. A single-binary, ultra-lightweight database with pure-Rust SIMD vector search, multi-agent multiplexing, and natural-language query planning.</p>
 
       <!-- SECTION 1: QUICKSTART -->
@@ -411,7 +413,7 @@
 cargo build --release --locked
 node bin/niodb.cjs</code></pre>
       
-      <p>On first launch, NioDB initializes a local data directory (default <code>./niodb</code>) and listens on <code>http://127.0.0.1:7432</code>.</p>
+      <p>On first launch, NioDB initializes a local data directory (default <code>./nio-db</code>) and listens on <code>http://127.0.0.1:7432</code>.</p>
       
       <div class="table-wrap">
         <table>
@@ -421,12 +423,20 @@ node bin/niodb.cjs</code></pre>
           <tbody>
             <tr><td><code>--dir &lt;path&gt;</code></td><td>Set custom database storage directory.</td></tr>
             <tr><td><code>--listen &lt;ip:port&gt;</code></td><td>Override local bind address (default <code>127.0.0.1:7432</code>).</td></tr>
+            <tr><td><code>--seed-demo</code></td><td>Add the starter demo set to an existing database once.</td></tr>
+            <tr><td><code>--no-demo</code></td><td>Skip demos when creating a new database.</td></tr>
             <tr><td><code>--yes</code></td><td>Accept all first-run setup defaults without prompts.</td></tr>
             <tr><td><code>NIODB_NO_INSTALL_NIO=1</code></td><td>Skip automatic Nio CLI installation.</td></tr>
             <tr><td><code>NIODB_CORS_ORIGINS</code></td><td>Comma-separated list of allowed CORS origins.</td></tr>
           </tbody>
         </table>
       </div>
+
+      <h3 id="demo">Your starter demo</h3>
+      <p>A new database includes one welcome record in the <code>demo</code> collection, one <code>niodb_demo</code> user, one <code>welcome.txt</code> file in the <code>demo</code> bucket, one <code>demo.ping</code> TypeScript worker, and one starter event. File storage also creates a file metadata record.</p>
+      <p>The worker demonstrates <code>fetch()</code> by calling this server's <code>/health</code> REST endpoint. It runs once when the demos are created; publishing another <code>demo.ping</code> event runs it again. The starter event appears when you connect to the live stream. Other events are delivered live without historical replay.</p>
+      <p>The demo user's randomly generated password is saved in <code>nio-db/demo-user.json</code> (or your custom data directory). Use this file to test user login. A successful login returns an app-user session token; the console's Test Login action keeps your console bearer token unchanged.</p>
+      <p>Demos are created once. Restarting does not duplicate them or recreate examples you delete. Existing databases retain their data; start with <code>--seed-demo</code> to add the starter set, or use <code>NIODB_SEED_DEMO=1</code> with the development launcher. To create a database without demos, use <code>--no-demo</code> or <code>NIODB_NO_DEMO=1</code>.</p>
 
       <!-- SECTION 2: CLIENT SDKS -->
       <h2 id="sdks">2. Client SDKs</h2>
@@ -540,8 +550,8 @@ matches = knowledge.search_vector(
       <h2 id="tokens">3. Authentication & Tokens</h2>
       <p>NioDB uses standard Bearer tokens for all protected HTTP endpoints.</p>
       <p>During initial setup, two secure credentials are created in your data directory: <code>client-token</code> and <code>secret-token</code>. Bearer authentication supports combining both credentials (<code>&lt;client-token&gt;:&lt;secret-token&gt;</code>) or using your client token directly.</p>
-      <pre><code>CLIENT_TOKEN=$(cat ./niodb/client-token)
-SECRET_TOKEN=$(cat ./niodb/secret-token)
+      <pre><code>CLIENT_TOKEN=$(cat ./nio-db/client-token)
+SECRET_TOKEN=$(cat ./nio-db/secret-token)
 NIODB_TOKEN="${CLIENT_TOKEN}:${SECRET_TOKEN}"
 
 curl http://127.0.0.1:7432/api/v1/status \
@@ -785,6 +795,123 @@ curl http://127.0.0.1:7432/api/v1/status \
       <pre><code>curl -N "http://127.0.0.1:7432/api/v1/events/stream?name=*" \
   -H "Authorization: Bearer $NIODB_TOKEN"</code></pre>
 
+      <h2 id="workers">TypeScript Event Workers</h2>
+      <p>Workers run JavaScript or TypeScript whenever a matching event is published. They can call REST APIs using Node's built-in <code>fetch()</code>, read environment variables, and use Node modules. Each source file must export a default function that receives the event.</p>
+      <p>Use <strong>Console → Events &amp; Webhook → Event Workers</strong> to register a worker, view its source, format the code, or save updates. The REST endpoints below provide the same operations.</p>
+      <h3>Event input and execution</h3>
+<pre><code>type LiveEvent = {
+  id: string;
+  name: string;
+  actor: string;
+  created_at: string;
+  data: Record&lt;string, unknown&gt;;
+};
+
+export default async function (event: LiveEvent) {
+  // Your code runs for each matching published event.
+}</code></pre>
+      <p>Set <code>event_name</code> to an exact name such as <code>demo.ping</code>, or <code>*</code> to receive all events. Worker registration, details, updates, deletion, and event publishing require a backend secret bearer credential (secret token or client:secret combination).</p>
+      <p>Workers require Node 22+ with <code>stripTypeScriptTypes</code> support. They run as trusted server code in a separate process with a 5-second total timeout, a 64 MiB V8 heap, and at most 2 concurrent executions. Source is limited to 32 KiB. They inherit the server's environment and filesystem/network access. Import Node modules with <code>node:</code> specifiers; relative imports from a worker's source are not supported.</p>
+      <p>Publishing returns before workers finish. Worker output is not returned to the publisher or displayed in the console. Failures and capacity skips are reported in the server terminal. Workers do not retry automatically; make external side effects idempotent using <code>event.id</code>.</p>
+      <h3>Example 1: GET a REST endpoint</h3>
+      <p>This is the starter worker. Save it as <code>worker.ts</code> and subscribe to <code>demo.ping</code>. Change the URL if your server uses another port.</p>
+<pre><code>type Event = { id: string; name: string; data: unknown };
+
+export default async function (event: Event) {
+  const response = await fetch(&quot;http://127.0.0.1:7432/health&quot;, {
+    signal: AbortSignal.timeout(3000),
+  });
+  if (!response.ok) {
+    throw new Error(`Health API returned ${response.status}`);
+  }
+  const health = await response.json();
+  // Use the returned JSON in your own integration.
+}</code></pre>
+      <h3>Example 2: POST JSON with API authentication</h3>
+      <p>Subscribe to <code>order.created</code>. Configure <code>ALERT_API_URL</code> and <code>ALERT_API_TOKEN</code> in the environment when starting NioDB. Replace these with your API's URL and credential. The receiving API must support your chosen idempotency header.</p>
+<pre><code>type OrderEvent = {
+  id: string;
+  data: { order_id: string; total: number };
+};
+
+export default async function (event: OrderEvent) {
+  const url = process.env.ALERT_API_URL;
+  const token = process.env.ALERT_API_TOKEN;
+  if (!url || !token) throw new Error(&quot;Configure the alert API&quot;);
+
+  const response = await fetch(url, {
+    method: &quot;POST&quot;,
+    headers: {
+      &quot;Content-Type&quot;: &quot;application/json&quot;,
+      Authorization: `Bearer ${token}`,
+      &quot;Idempotency-Key&quot;: event.id,
+    },
+    body: JSON.stringify({
+      order_id: event.data.order_id,
+      total: event.data.total,
+      message: &quot;Order received&quot;,
+    }),
+    signal: AbortSignal.timeout(3000),
+  });
+  if (!response.ok) {
+    throw new Error(`Alert API returned ${response.status}`);
+  }
+}</code></pre>
+      <h3>Example 3: Fetch a NioDB record</h3>
+      <p>Subscribe to <code>record.created</code> and publish its <code>record_id</code> in the event data. Set <code>NIODB_BASE_URL</code> and <code>NIODB_TOKEN</code> in the server environment. Credentials are not automatically injected into workers.</p>
+<pre><code>type RecordEvent = { data: { record_id: string } };
+
+export default async function (event: RecordEvent) {
+  const token = process.env.NIODB_TOKEN;
+  if (!token) throw new Error(&quot;Configure NIODB_TOKEN&quot;);
+  if (typeof event.data.record_id !== &quot;string&quot;) {
+    throw new Error(&quot;Event is missing record_id&quot;);
+  }
+  const base = process.env.NIODB_BASE_URL || &quot;http://127.0.0.1:7432&quot;;
+  const id = encodeURIComponent(event.data.record_id);
+  const response = await fetch(`${base}/api/v1/records/${id}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(3000),
+  });
+  if (!response.ok) {
+    throw new Error(`Record API returned ${response.status}`);
+  }
+  const record = await response.json();
+  // Send selected record fields to your integration here.
+}</code></pre>
+      <h3>Register and trigger a worker</h3>
+      <p>Save one of the examples to <code>worker.ts</code>. This command safely encodes its source into JSON. The example subscribes to <code>demo.ping</code>; use the appropriate event name for other examples.</p>
+<pre><code>export NIODB_TOKEN=&quot;your-backend-secret-or-client:secret&quot;
+
+node -e &#x27;const fs = require(&quot;node:fs&quot;); process.stdout.write(JSON.stringify({event_name: &quot;demo.ping&quot;, source: fs.readFileSync(&quot;worker.ts&quot;, &quot;utf8&quot;)}))&#x27; &gt; worker.json
+
+curl -X POST http://127.0.0.1:7432/api/v1/events/workers \
+  -H &quot;Authorization: Bearer $NIODB_TOKEN&quot; \
+  -H &quot;Content-Type: application/json&quot; \
+  --data-binary @worker.json
+
+curl -X POST http://127.0.0.1:7432/api/v1/events \
+  -H &quot;Authorization: Bearer $NIODB_TOKEN&quot; \
+  -H &quot;Content-Type: application/json&quot; \
+  -d &#x27;{&quot;name&quot;:&quot;demo.ping&quot;,&quot;data&quot;:{&quot;message&quot;:&quot;Test REST fetch&quot;}}&#x27; </code></pre>
+      <h3>List, inspect, update, and delete</h3>
+      <p>Replace <code>wrk_123</code> with the ID returned when registering. Listing returns worker metadata; getting a worker by ID includes its source. PATCH accepts <code>source</code>, <code>event_name</code>, or both, and preserves the worker's ID and creation details.</p>
+<pre><code>curl http://127.0.0.1:7432/api/v1/events/workers \
+  -H &quot;Authorization: Bearer $NIODB_TOKEN&quot;
+
+curl http://127.0.0.1:7432/api/v1/events/workers/wrk_123 \
+  -H &quot;Authorization: Bearer $NIODB_TOKEN&quot;
+
+# Edit worker.ts, then generate an update payload.
+node -e &#x27;const fs = require(&quot;node:fs&quot;); process.stdout.write(JSON.stringify({source: fs.readFileSync(&quot;worker.ts&quot;, &quot;utf8&quot;)}))&#x27; &gt; worker-update.json
+curl -X PATCH http://127.0.0.1:7432/api/v1/events/workers/wrk_123 \
+  -H &quot;Authorization: Bearer $NIODB_TOKEN&quot; \
+  -H &quot;Content-Type: application/json&quot; \
+  --data-binary @worker-update.json
+
+curl -X DELETE http://127.0.0.1:7432/api/v1/events/workers/wrk_123 \
+  -H &quot;Authorization: Bearer $NIODB_TOKEN&quot;</code></pre>
+
       <!-- SECTION 13: USERS & SESSIONS -->
       <h2 id="users">13. User Accounts & Session Tokens</h2>
       <p>Built-in user directory with salted PBKDF2 password hashing and 7-day bearer session tokens.</p>
@@ -891,7 +1018,7 @@ curl -X POST http://127.0.0.1:7432/auth/login \
 
       <!-- FOOTER -->
       <footer>
-        <div>NioDB Documentation · Served directly by the local database engine.</div>
+        <div>NioDB Guide · Served directly by the local database engine.</div>
         <div><a href="/console">Open Web Console →</a></div>
       </footer>
     </main>

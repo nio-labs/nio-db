@@ -15,6 +15,20 @@ test('compiler binds string values and table data instead of interpolating them'
   assert.equal(compileSql("SELECT id FROM artifacts WHERE status = 'Bob''s'", [], tables).bindings[1], "Bob's");
 });
 
+test('records alias uses the authorized all-records table', () => {
+  const query = compileSql('SELECT id, collection, created_at FROM records ORDER BY created_at DESC LIMIT 10', [], tables);
+  assert.equal(query.bindings[0], tables.artifacts);
+  assert.match(query.sql, /FROM \? AS \[records\]/);
+});
+
+test('line comments are ignored without changing quoted text', () => {
+  const query = compileSql("-- inspect recent records\nSELECT id FROM records -- keep only ids\nWHERE status = '-- pending' LIMIT 5;", [], tables);
+  assert.equal(query.bindings[0], tables.artifacts);
+  assert.equal(query.bindings[1], '-- pending');
+  assert.match(query.sql, /WHERE \[status\] = \? LIMIT 5/);
+  assert.throws(() => compileSql('SELECT id FROM records; -- first query\nDELETE FROM records', [], tables), /query_rejected/);
+});
+
 test('joins, aggregates and null checks have a bounded normalized form', () => {
   const query = compileSql('SELECT s.status, COUNT(*) AS total FROM sessions s LEFT JOIN projects p ON s.project_id = p.id WHERE p.status = ? AND s.summary IS NOT NULL GROUP BY s.status ORDER BY total DESC LIMIT 5', ['active'], tables);
   assert.deepEqual(query.bindings, [tables.sessions, tables.projects, 'active']);
