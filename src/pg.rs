@@ -142,7 +142,7 @@ impl NioPgHandler {
             return Ok(Response::Query(QueryResponse::new(schema, stream::iter(rows))));
         }
 
-        if upper.contains("CURRENT_SCHEMA()") {
+        if upper.contains("CURRENT_SCHEMA") {
             let schema = Arc::new(vec![FieldInfo::new(
                 "current_schema".into(),
                 None,
@@ -157,7 +157,85 @@ impl NioPgHandler {
             return Ok(Response::Query(QueryResponse::new(schema, stream::iter(rows))));
         }
 
-        // 4. PostgreSQL Catalog Queries (DBeaver / TablePlus / DB Explorer support)
+        if upper.contains("CURRENT_SETTING") {
+            let val = if upper.contains("SERVER_VERSION_NUM") {
+                "150000"
+            } else if upper.contains("SERVER_VERSION") {
+                "15.0 (NioDB)"
+            } else if upper.contains("SEARCH_PATH") {
+                "public"
+            } else if upper.contains("STANDARD_CONFORMING_STRINGS") {
+                "on"
+            } else if upper.contains("INTEGER_DATETIMES") {
+                "on"
+            } else if upper.contains("TIMEZONE") || upper.contains("TIME_ZONE") {
+                "UTC"
+            } else if upper.contains("TRANSACTION_ISOLATION") {
+                "read committed"
+            } else if upper.contains("IS_SUPERUSER") {
+                "on"
+            } else {
+                ""
+            };
+            let schema = Arc::new(vec![FieldInfo::new(
+                "current_setting".into(),
+                None,
+                None,
+                Type::TEXT,
+                FieldFormat::Text,
+            )]);
+            let mut encoder = DataRowEncoder::new(schema.clone());
+            encoder.encode_field(&val)?;
+            let rows = vec![Ok(encoder.take_row())];
+            return Ok(Response::Query(QueryResponse::new(schema, stream::iter(rows))));
+        }
+
+        if upper.contains("PG_IS_IN_RECOVERY") {
+            let schema = Arc::new(vec![FieldInfo::new(
+                "pg_is_in_recovery".into(),
+                None,
+                None,
+                Type::BOOL,
+                FieldFormat::Text,
+            )]);
+            let mut encoder = DataRowEncoder::new(schema.clone());
+            encoder.encode_field(&false)?;
+            let rows = vec![Ok(encoder.take_row())];
+            return Ok(Response::Query(QueryResponse::new(schema, stream::iter(rows))));
+        }
+
+        if upper.contains("TXID_CURRENT") {
+            let schema = Arc::new(vec![FieldInfo::new(
+                "txid_current".into(),
+                None,
+                None,
+                Type::INT8,
+                FieldFormat::Text,
+            )]);
+            let mut encoder = DataRowEncoder::new(schema.clone());
+            encoder.encode_field(&1001i64)?;
+            let rows = vec![Ok(encoder.take_row())];
+            return Ok(Response::Query(QueryResponse::new(schema, stream::iter(rows))));
+        }
+
+        if upper.contains("HAS_DATABASE_PRIVILEGE")
+            || upper.contains("HAS_SCHEMA_PRIVILEGE")
+            || upper.contains("HAS_TABLE_PRIVILEGE")
+        {
+            let schema = Arc::new(vec![FieldInfo::new(
+                "has_privilege".into(),
+                None,
+                None,
+                Type::BOOL,
+                FieldFormat::Text,
+            )]);
+            let mut encoder = DataRowEncoder::new(schema.clone());
+            encoder.encode_field(&true)?;
+            let rows = vec![Ok(encoder.take_row())];
+            return Ok(Response::Query(QueryResponse::new(schema, stream::iter(rows))));
+        }
+
+        // 4. PostgreSQL Catalog Queries (DBeaver / TablePlus / JDBC support)
         if upper.contains("PG_NAMESPACE") || upper.contains("INFORMATION_SCHEMA.SCHEMATA") {
             let schema = Arc::new(vec![
                 FieldInfo::new("oid".into(), None, None, Type::INT4, FieldFormat::Text),
@@ -191,6 +269,104 @@ impl NioPgHandler {
             encoder.encode_field(&10i32)?;
             encoder.encode_field(&6i32)?; // UTF8
             let rows = vec![Ok(encoder.take_row())];
+            return Ok(Response::Query(QueryResponse::new(schema, stream::iter(rows))));
+        }
+
+        if upper.contains("PG_TYPE") {
+            let schema = Arc::new(vec![
+                FieldInfo::new("oid".into(), None, None, Type::INT4, FieldFormat::Text),
+                FieldInfo::new("typname".into(), None, None, Type::VARCHAR, FieldFormat::Text),
+                FieldInfo::new("typnamespace".into(), None, None, Type::INT4, FieldFormat::Text),
+                FieldInfo::new("typlen".into(), None, None, Type::INT2, FieldFormat::Text),
+                FieldInfo::new("typtype".into(), None, None, Type::CHAR, FieldFormat::Text),
+                FieldInfo::new("typcategory".into(), None, None, Type::CHAR, FieldFormat::Text),
+                FieldInfo::new("typispreferred".into(), None, None, Type::BOOL, FieldFormat::Text),
+                FieldInfo::new("typisdefined".into(), None, None, Type::BOOL, FieldFormat::Text),
+                FieldInfo::new("typdelim".into(), None, None, Type::CHAR, FieldFormat::Text),
+                FieldInfo::new("typrelid".into(), None, None, Type::INT4, FieldFormat::Text),
+                FieldInfo::new("typelem".into(), None, None, Type::INT4, FieldFormat::Text),
+                FieldInfo::new("typarray".into(), None, None, Type::INT4, FieldFormat::Text),
+            ]);
+            let types = [
+                (16i32, "bool", 1i16, "b", "B", true, 0i32, 0i32, 1000i32),
+                (20i32, "int8", 8i16, "b", "N", false, 0i32, 0i32, 1016i32),
+                (21i32, "int2", 2i16, "b", "N", false, 0i32, 0i32, 1005i32),
+                (23i32, "int4", 4i16, "b", "N", false, 0i32, 0i32, 1007i32),
+                (25i32, "text", -1i16, "b", "S", true, 0i32, 0i32, 1009i32),
+                (700i32, "float4", 4i16, "b", "N", false, 0i32, 0i32, 1021i32),
+                (701i32, "float8", 8i16, "b", "N", true, 0i32, 0i32, 1022i32),
+                (1043i32, "varchar", -1i16, "b", "S", false, 0i32, 0i32, 1015i32),
+                (1114i32, "timestamp", 8i16, "b", "D", false, 0i32, 0i32, 1115i32),
+                (1184i32, "timestamptz", 8i16, "b", "D", true, 0i32, 0i32, 1185i32),
+                (3802i32, "jsonb", -1i16, "b", "U", false, 0i32, 0i32, 3807i32),
+                (114i32, "json", -1i16, "b", "U", false, 0i32, 0i32, 199i32),
+            ];
+            let mut rows = Vec::new();
+            for (oid, name, len, typtype, typcategory, ispref, typrelid, typelem, typarray) in types {
+                let mut encoder = DataRowEncoder::new(schema.clone());
+                encoder.encode_field(&oid)?;
+                encoder.encode_field(&name)?;
+                encoder.encode_field(&11i32)?; // pg_catalog
+                encoder.encode_field(&len)?;
+                encoder.encode_field(&typtype)?;
+                encoder.encode_field(&typcategory)?;
+                encoder.encode_field(&ispref)?;
+                encoder.encode_field(&true)?;
+                encoder.encode_field(&",")?;
+                encoder.encode_field(&typrelid)?;
+                encoder.encode_field(&typelem)?;
+                encoder.encode_field(&typarray)?;
+                rows.push(Ok(encoder.take_row()));
+            }
+            return Ok(Response::Query(QueryResponse::new(schema, stream::iter(rows))));
+        }
+
+        if upper.contains("PG_ROLES") || upper.contains("PG_USER") || upper.contains("PG_AUTHID") {
+            let schema = Arc::new(vec![
+                FieldInfo::new("rolname".into(), None, None, Type::VARCHAR, FieldFormat::Text),
+                FieldInfo::new("rolsuper".into(), None, None, Type::BOOL, FieldFormat::Text),
+                FieldInfo::new("rolinherit".into(), None, None, Type::BOOL, FieldFormat::Text),
+                FieldInfo::new("rolcreaterole".into(), None, None, Type::BOOL, FieldFormat::Text),
+                FieldInfo::new("rolcreatedb".into(), None, None, Type::BOOL, FieldFormat::Text),
+                FieldInfo::new("rolcanlogin".into(), None, None, Type::BOOL, FieldFormat::Text),
+            ]);
+            let mut encoder = DataRowEncoder::new(schema.clone());
+            encoder.encode_field(&"niodb")?;
+            encoder.encode_field(&true)?;
+            encoder.encode_field(&true)?;
+            encoder.encode_field(&true)?;
+            encoder.encode_field(&true)?;
+            encoder.encode_field(&true)?;
+            let rows = vec![Ok(encoder.take_row())];
+            return Ok(Response::Query(QueryResponse::new(schema, stream::iter(rows))));
+        }
+
+        if upper.contains("PG_CLASS") {
+            let collections = {
+                let store = self.store.lock().unwrap();
+                let mut cols = store.collections(&self.workspace_id);
+                if !cols.iter().any(|c| c == "records") {
+                    cols.push("records".into());
+                }
+                cols
+            };
+            let schema = Arc::new(vec![
+                FieldInfo::new("oid".into(), None, None, Type::INT4, FieldFormat::Text),
+                FieldInfo::new("relname".into(), None, None, Type::VARCHAR, FieldFormat::Text),
+                FieldInfo::new("relnamespace".into(), None, None, Type::INT4, FieldFormat::Text),
+                FieldInfo::new("relkind".into(), None, None, Type::CHAR, FieldFormat::Text),
+                FieldInfo::new("relowner".into(), None, None, Type::INT4, FieldFormat::Text),
+            ]);
+            let mut rows = Vec::new();
+            for (idx, col) in collections.iter().enumerate() {
+                let mut encoder = DataRowEncoder::new(schema.clone());
+                encoder.encode_field(&(16384i32 + idx as i32))?;
+                encoder.encode_field(&col.as_str())?;
+                encoder.encode_field(&2200i32)?; // public schema
+                encoder.encode_field(&"r")?; // table
+                encoder.encode_field(&10i32)?;
+                rows.push(Ok(encoder.take_row()));
+            }
             return Ok(Response::Query(QueryResponse::new(schema, stream::iter(rows))));
         }
 
@@ -228,6 +404,31 @@ impl NioPgHandler {
                 encoder.encode_field(&false)?;
                 rows.push(Ok(encoder.take_row()));
             }
+            return Ok(Response::Query(QueryResponse::new(schema, stream::iter(rows))));
+        }
+
+        if upper.contains("PG_") || upper.contains("INFORMATION_SCHEMA") {
+            let schema = Arc::new(vec![FieldInfo::new(
+                "result".into(),
+                None,
+                None,
+                Type::VARCHAR,
+                FieldFormat::Text,
+            )]);
+            return Ok(Response::Query(QueryResponse::new(schema, stream::iter(vec![]))));
+        }
+
+        if !upper.contains(" FROM ") {
+            let schema = Arc::new(vec![FieldInfo::new(
+                "?column?".into(),
+                None,
+                None,
+                Type::VARCHAR,
+                FieldFormat::Text,
+            )]);
+            let mut encoder = DataRowEncoder::new(schema.clone());
+            encoder.encode_field(&"")?;
+            let rows = vec![Ok(encoder.take_row())];
             return Ok(Response::Query(QueryResponse::new(schema, stream::iter(rows))));
         }
 
