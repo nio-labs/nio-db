@@ -41,7 +41,7 @@ jobs:
             pkg_platform: win32
             pkg_arch: x64
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -72,7 +72,7 @@ jobs:
           files: |
             dist/nio-db-${{ matrix.pkg_platform }}-${{ matrix.pkg_arch }}/niodb*
       - name: Publish platform package to npm
-        if: ${{ env.NODE_AUTH_TOKEN != '' }}
+        if: ${{ secrets.NPM_TOKEN != '' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
@@ -84,7 +84,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -92,12 +92,12 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Publish @nio-labs/nio-db.js
-        if: ${{ env.NODE_AUTH_TOKEN != '' }}
+        if: ${{ secrets.NPM_TOKEN != '' }}
         run: |
           cd packages/nio-db.js
           npm publish --access public || true
       - name: Publish @nio-labs/nio-db
-        if: ${{ env.NODE_AUTH_TOKEN != '' }}
+        if: ${{ secrets.NPM_TOKEN != '' }}
         run: |
           npm publish --access public || true
 
@@ -105,7 +105,7 @@ jobs:
     name: publish python package to PyPI
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -115,7 +115,7 @@ jobs:
           python -m pip install --upgrade build twine
           python -m build
       - name: Publish to PyPI
-        if: ${{ env.TWINE_PASSWORD != '' }}
+        if: ${{ secrets.PYPI_API_TOKEN != '' }}
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
