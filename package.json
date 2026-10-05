@@ -25,19 +25,20 @@
     "check:sql": "node --test scripts/sql.test.cjs",
     "check:sdk": "node --test scripts/sdk.test.cjs",
     "check:py": "python3 -m unittest discover -s packages/nio-db-py/tests",
-    "test": "npm run check:launcher && npm run check:sql && npm run check:sdk"
+    "test": "npm run check:launcher && npm run check:sql && npm run check:sdk",
+    "publish:all": "node scripts/publish-all.cjs"
   },
   "dependencies": {
     "alasql": "^4.0.0",
     "@nio-labs/nio-ai": "0.3.3"
   },
   "optionalDependencies": {
-    "@nio-labs/nio-db-darwin-arm64": "0.1.1",
-    "@nio-labs/nio-db-darwin-x64": "0.1.1",
-    "@nio-labs/nio-db-linux-arm64": "0.1.1",
-    "@nio-labs/nio-db-linux-x64": "0.1.1",
-    "@nio-labs/nio-db-win32-arm64": "0.1.1",
-    "@nio-labs/nio-db-win32-x64": "0.1.1"
+    "@nio-labs/nio-db-darwin-arm64": "1.0.0",
+    "@nio-labs/nio-db-darwin-x64": "1.0.0",
+    "@nio-labs/nio-db-linux-arm64": "1.0.0",
+    "@nio-labs/nio-db-linux-x64": "1.0.0",
+    "@nio-labs/nio-db-win32-arm64": "1.0.0",
+    "@nio-labs/nio-db-win32-x64": "1.0.0"
   },
   "publishConfig": {
     "access": "public"

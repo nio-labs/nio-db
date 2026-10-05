@@ -1,0 +1,94 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x86_64
+            pkg_platform: linux
+            pkg_arch: x64
+          - os: ubuntu-24.04-arm
+            target: linux-aarch64
+            pkg_platform: linux
+            pkg_arch: arm64
+          - os: macos-15
+            target: darwin-aarch64
+            pkg_platform: darwin
+            pkg_arch: arm64
+          - os: macos-15
+            target: darwin-x86_64
+            pkg_platform: darwin
+            pkg_arch: x64
+          - os: windows-latest
+            target: windows-x86_64
+            pkg_platform: win32
+            pkg_arch: x64
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: 'https://registry.npmjs.org'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build (release)
+        run: |
+          if [ "${{ matrix.target }}" = "darwin-x86_64" ]; then
+            rustup target add x86_64-apple-darwin
+            cargo build --release --locked --target x86_64-apple-darwin
+          else
+            cargo build --release --locked
+          fi
+      - name: Package platform npm package
+        run: |
+          BIN_PATH="target/release/niodb"
+          if [ "${{ matrix.target }}" = "darwin-x86_64" ]; then
+            BIN_PATH="target/x86_64-apple-darwin/release/niodb"
+          elif [ "${{ matrix.target }}" = "windows-x86_64" ]; then
+            BIN_PATH="target/release/niodb.exe"
+          fi
+          node scripts/package-platform.cjs "$BIN_PATH" "${{ matrix.pkg_platform }}" "${{ matrix.pkg_arch }}"
+      - name: Publish platform package to npm
+        if: ${{ env.NODE_AUTH_TOKEN != '' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          cd "dist/nio-db-${{ matrix.pkg_platform }}-${{ matrix.pkg_arch }}"
+          npm publish --access public || true
+
+  publish-main:
+    name: publish main npm packages
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: 'https://registry.npmjs.org'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish @nio-labs/nio-db.js
+        if: ${{ env.NODE_AUTH_TOKEN != '' }}
+        run: |
+          cd packages/nio-db.js
+          npm publish --access public || true
+      - name: Publish @nio-labs/nio-db
+        if: ${{ env.NODE_AUTH_TOKEN != '' }}
+        run: |
+          npm publish --access public || true
