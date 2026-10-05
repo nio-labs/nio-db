@@ -854,10 +854,19 @@ pub fn project_column_names(sql: &str) -> Option<Vec<String>> {
             SelectExpr::Aggregate { func, field, alias } => {
                 if let Some(a) = alias {
                     cols.push(a.clone());
-                } else if let Some(f) = field {
-                    cols.push(format!("{:?}({})", func, f).to_lowercase());
                 } else {
-                    cols.push("count".into());
+                    let label = match func {
+                        AggFunc::Count => "count",
+                        AggFunc::Avg => "avg",
+                        AggFunc::Sum => "sum",
+                        AggFunc::Min => "min",
+                        AggFunc::Max => "max",
+                    };
+                    cols.push(format!(
+                        "{}({})",
+                        label,
+                        field.as_deref().unwrap_or(if *func == AggFunc::Count { "*" } else { "" })
+                    ));
                 }
             }
         }

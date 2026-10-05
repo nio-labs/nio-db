@@ -1,11 +1,14 @@
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
-use futures::{stream, Sink};
+use futures::{stream, Sink, SinkExt};
 use serde_json::Value;
 use tokio::net::TcpListener;
 
-use pgwire::api::auth::noop::NoopStartupHandler;
+use pgwire::api::auth::{
+    finish_authentication, protocol_negotiation, save_startup_parameters_to_metadata,
+    DefaultServerParameterProvider, StartupHandler,
+};
 use pgwire::api::portal::Portal;
 use pgwire::api::query::{ExtendedQueryHandler, SimpleQueryHandler};
 use pgwire::api::results::{
@@ -13,12 +16,14 @@ use pgwire::api::results::{
 };
 use pgwire::api::stmt::NoopQueryParser;
 use pgwire::api::store::PortalStore;
-use pgwire::api::{ClientInfo, ClientPortalStore, PgWireServerHandlers, Type};
+use pgwire::api::{ClientInfo, ClientPortalStore, PgWireConnectionState, PgWireServerHandlers, Type};
 use pgwire::error::{PgWireError, PgWireResult};
-use pgwire::messages::PgWireBackendMessage;
+use pgwire::messages::startup::{Authentication, SecretKey};
+use pgwire::messages::{PgWireBackendMessage, PgWireFrontendMessage};
 use pgwire::tokio::process_socket;
 
 use crate::api::App;
+use crate::auth::Principal;
 use crate::query::AlaSql;
 use crate::storage::Store;
 
@@ -404,7 +409,72 @@ impl NioPgHandler {
     }
 }
 
-impl NoopStartupHandler for NioPgHandler {}
+pub struct NioPgStartupHandler {
+    principals: Arc<Vec<Principal>>,
+    pg_password: Option<String>,
+    parameter_provider: DefaultServerParameterProvider,
+}
+
+impl NioPgStartupHandler {
+    pub fn new(principals: Arc<Vec<Principal>>, pg_password: Option<String>) -> Self {
+        Self {
+            principals,
+            pg_password,
+            parameter_provider: DefaultServerParameterProvider::default(),
+        }
+    }
+
+    pub fn verify_password(&self, input: &str) -> bool {
+        if input.is_empty() {
+            return false;
+        }
+        if let Some(ref expected) = self.pg_password {
+            if input == expected {
+                return true;
+            }
+        }
+        crate::auth::authenticate(&self.principals, input).is_some()
+    }
+}
+
+#[async_trait]
+impl StartupHandler for NioPgStartupHandler {
+    async fn on_startup<C>(
+        &self,
+        client: &mut C,
+        message: PgWireFrontendMessage,
+    ) -> PgWireResult<()>
+    where
+        C: ClientInfo + Sink<PgWireBackendMessage> + Unpin + Send + Sync,
+        C::Error: Debug,
+        PgWireError: From<<C as Sink<PgWireBackendMessage>>::Error>,
+    {
+        match message {
+            PgWireFrontendMessage::Startup(ref startup) => {
+                protocol_negotiation(client, startup).await?;
+                save_startup_parameters_to_metadata(client, startup);
+                client.set_state(PgWireConnectionState::AuthenticationInProgress);
+                client
+                    .send(PgWireBackendMessage::Authentication(
+                        Authentication::CleartextPassword,
+                    ))
+                    .await?;
+            }
+            PgWireFrontendMessage::PasswordMessageFamily(pwd) => {
+                let pwd = pwd.into_password()?;
+                if self.verify_password(&pwd.password) {
+                    client.set_pid_and_secret_key(1001, SecretKey::I32(2002));
+                    finish_authentication(client, &self.parameter_provider).await?;
+                } else {
+                    let user = client.metadata().get("user").cloned().unwrap_or_default();
+                    return Err(PgWireError::InvalidPassword(user));
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+}
 
 #[async_trait]
 impl SimpleQueryHandler for NioPgHandler {
@@ -448,11 +518,12 @@ impl ExtendedQueryHandler for NioPgHandler {
 
 pub struct NioPgHandlerFactory {
     handler: Arc<NioPgHandler>,
+    startup: Arc<NioPgStartupHandler>,
 }
 
 impl NioPgHandlerFactory {
-    pub fn new(handler: Arc<NioPgHandler>) -> Self {
-        Self { handler }
+    pub fn new(handler: Arc<NioPgHandler>, startup: Arc<NioPgStartupHandler>) -> Self {
+        Self { handler, startup }
     }
 }
 
@@ -465,14 +536,15 @@ impl PgWireServerHandlers for NioPgHandlerFactory {
         self.handler.clone()
     }
 
-    fn startup_handler(&self) -> Arc<impl pgwire::api::auth::StartupHandler> {
-        self.handler.clone()
+    fn startup_handler(&self) -> Arc<impl StartupHandler> {
+        self.startup.clone()
     }
 }
 
 pub async fn run_pg_server(
     app: App,
     listen_addr: std::net::SocketAddr,
+    pg_password: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let workspace_id = crate::api::server_workspace(&app);
     let handler = Arc::new(NioPgHandler::new(
@@ -480,7 +552,11 @@ pub async fn run_pg_server(
         app.query.clone(),
         workspace_id,
     ));
-    let factory = Arc::new(NioPgHandlerFactory::new(handler));
+    let startup = Arc::new(NioPgStartupHandler::new(
+        app.principals.clone(),
+        pg_password,
+    ));
+    let factory = Arc::new(NioPgHandlerFactory::new(handler, startup));
 
     let listener = TcpListener::bind(listen_addr).await?;
     loop {
@@ -598,6 +674,34 @@ mod tests {
         } else {
             panic!("expected query response");
         }
+    }
+
+    #[test]
+    fn test_pg_password_verification() {
+        use sha2::{Digest, Sha256};
+        let token = "niodb_client_1234567890abcdef1234567890abcdef";
+        let token_hash = crate::storage::hex(&Sha256::digest(token.as_bytes()));
+        let principals = Arc::new(vec![Principal {
+            name: "test-user".into(),
+            token_sha256: token_hash,
+            workspaces: vec!["ws_test".into()],
+            nio_skills: vec![],
+            nio_plugins: vec![],
+        }]);
+
+        // 1. With explicit pg_password
+        let auth = NioPgStartupHandler::new(principals.clone(), Some("supersecret".into()));
+        assert!(auth.verify_password("supersecret"));
+        assert!(auth.verify_password(token)); // valid token also works
+        assert!(!auth.verify_password("wrongpass"));
+        assert!(!auth.verify_password(""));
+
+        // 2. Without explicit pg_password (requires valid token)
+        let auth_token_only = NioPgStartupHandler::new(principals, None);
+        assert!(auth_token_only.verify_password(token));
+        assert!(!auth_token_only.verify_password("supersecret"));
+        assert!(!auth_token_only.verify_password("wrongpass"));
+        assert!(!auth_token_only.verify_password(""));
     }
 }
 
