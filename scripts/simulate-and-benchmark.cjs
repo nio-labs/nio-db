@@ -11,12 +11,20 @@ const ROOT = resolve(__dirname, '..');
 const SQLITE = process.argv.includes('--sqlite');
 const BINARY = join(ROOT, 'target', 'release', SQLITE ? 'sqlite-benchmark' : (process.platform === 'win32' ? 'niodb.exe' : 'niodb'));
 // Use the repository filesystem, rather than /tmp (which may be a RAM disk).
-const DATA = mkdtempSync(join(ROOT, '.benchmark-data-'));
 const PORT = Number(process.env.NIODB_BENCHMARK_PORT || 7488);
 const BASE = `http://127.0.0.1:${PORT}`;
 const OUTPUT = resolve(process.env.NIODB_BENCHMARK_OUTPUT || join(ROOT, SQLITE ? 'benchmarks/sqlite.json' : 'benchmarks/latest.json'));
-const TOTAL = 10000;
-const BATCH = 500;
+const TOTAL = Number(process.env.NIODB_BENCHMARK_RECORDS || 10000);
+const BATCH = Number(process.env.NIODB_BENCHMARK_BATCH_SIZE || 500);
+const DIMENSIONS = Number(process.env.NIODB_BENCHMARK_DIMENSIONS || 8);
+if (!Number.isInteger(TOTAL) || TOTAL < 1000 || !Number.isInteger(BATCH) || BATCH < 1 ||
+    !Number.isInteger(DIMENSIONS) || DIMENSIONS < 1 || DIMENSIONS > 4096) {
+  throw new Error('Use at least 1000 records, a positive batch size, and 1–4096 dimensions');
+}
+const TELEMETRY = Math.floor(TOTAL * 0.5);
+const CUSTOMERS = Math.floor(TOTAL * 0.3);
+const VECTOR_START = TELEMETRY + CUSTOMERS;
+const DATA = mkdtempSync(join(ROOT, '.benchmark-data-'));
 let server;
 let stderr = '';
 let token;
@@ -58,6 +66,10 @@ function bytesUnder(path) {
 }
 function processMemory(pid) {
   try {
+    if (process.platform === 'darwin') {
+      const rss = Number(execFileSync('ps', ['-o', 'rss=', '-p', String(pid)], { encoding: 'utf8' }).trim()) * 1024;
+      return Number.isFinite(rss) && rss > 0 ? { rss, peak: null, pss: null } : null;
+    }
     const status = readFileSync(`/proc/${pid}/status`, 'utf8');
     const rollup = readFileSync(`/proc/${pid}/smaps_rollup`, 'utf8');
     return { rss: Number(status.match(/^VmRSS:\s+(\d+)/m)[1]) * 1024,
@@ -80,14 +92,22 @@ function resourceSnapshot(stage) {
       } catch {}
     }
   } catch {}
+  if (process.platform === 'darwin') {
+    try {
+      for (const line of execFileSync('ps', ['-axo', 'pid=,ppid='], { encoding: 'utf8' }).trim().split('\n')) {
+        const [pid, parent] = line.trim().split(/\s+/).map(Number);
+        if (parent === server.pid) pids.add(pid);
+      }
+    } catch {}
+  }
   const workers = [...pids].map(pid => processMemory(pid)).filter(Boolean);
   const sqlRss = workers.reduce((sum, worker) => sum + worker.rss, 0);
-  const sqlPss = workers.reduce((sum, worker) => sum + worker.pss, 0);
+  const sqlPss = rust.pss === null ? null : workers.reduce((sum, worker) => sum + worker.pss, 0);
   const snapshot = { stage, rust_rss_bytes: rust.rss, rust_peak_rss_bytes: rust.peak,
     sql_worker_count: workers.length, sql_workers_rss_bytes: sqlRss, combined_rss_bytes: rust.rss + sqlRss,
-    rust_pss_bytes: rust.pss, sql_workers_pss_bytes: sqlPss, combined_pss_bytes: rust.pss + sqlPss };
+    rust_pss_bytes: rust.pss, sql_workers_pss_bytes: sqlPss, combined_pss_bytes: rust.pss === null ? null : rust.pss + sqlPss };
   memory.push(snapshot);
-  console.log(`Memory ${stage}: server ${(rust.rss/1048576).toFixed(2)} MiB, SQL workers ${(sqlRss/1048576).toFixed(2)} MiB (${workers.length} processes), combined PSS ${((rust.pss+sqlPss)/1048576).toFixed(2)} MiB.`);
+  console.log(`Memory ${stage}: server ${(rust.rss/1048576).toFixed(2)} MiB, SQL workers ${(sqlRss/1048576).toFixed(2)} MiB (${workers.length} processes), combined RSS ${((rust.rss+sqlRss)/1048576).toFixed(2)} MiB.`);
   return snapshot;
 }
 async function cleanup() {
@@ -102,7 +122,7 @@ async function cleanup() {
 }
 
 async function main() {
-  console.log(`${SQLITE ? 'SQLite adapter' : 'NioDB'} local HTTP benchmark: 10,000 records, 4 files; one request at a time.`);
+  console.log(`${SQLITE ? 'SQLite adapter' : 'NioDB'} local HTTP benchmark: ${TOTAL} records, ${DIMENSIONS} vector dimensions, 4 files; one request at a time.`);
   if (SQLITE) token = randomBytes(32).toString('hex');
   else {
     const credentials = JSON.parse(execFileSync(BINARY, ['init-auth', '--dir', DATA, '--name', 'benchmark'], { encoding: 'utf8' }));
@@ -147,19 +167,19 @@ async function main() {
 
   const records = Array.from({ length: TOTAL }, (_, index) => {
     const i = index + 1;
-    if (i <= 5000) return { collection: 'telemetry', data: {
+    if (i <= TELEMETRY) return { collection: 'telemetry', data: {
       metric_id: `met_${i}`, service: ['auth', 'billing', 'api', 'vectors', 'sync'][i % 5],
       cpu_percent: Math.round((Math.sin(i) * 30 + 50) * 10) / 10, mem_mb: 128 + i % 256,
       status: i % 100 === 0 ? 'degraded' : 'ok', latency_ms: 15 + i % 80,
       timestamp: 1728000000000 + i * 1000 } };
-    if (i <= 8000) return { collection: 'customers', data: {
-      customer_id: `cust_${i - 5000}`, name: `Client ${i - 5000}`, email: `client${i - 5000}@example.com`,
+    if (i <= VECTOR_START) return { collection: 'customers', data: {
+      customer_id: `cust_${i - TELEMETRY}`, name: `Client ${i - TELEMETRY}`, email: `client${i - TELEMETRY}@example.com`,
       plan: ['free', 'pro', 'enterprise'][i % 3], credits: 100 + i * 7 % 5000,
       country: ['US', 'DE', 'SG', 'JP', 'FR', 'UK', 'CA'][i % 7], active: i % 15 !== 0 } };
-    const vector = Array.from({ length: 8 }, (_, d) => Math.sin((i - 8000) * 0.1 + d));
+    const vector = Array.from({ length: DIMENSIONS }, (_, d) => Math.sin((i - VECTOR_START) * 0.1 + d));
     const norm = Math.hypot(...vector);
     return { collection: 'ai_memories', data: {
-      memory_id: `mem_${i - 8000}`, summary: `Codebase architecture step ${i - 8000}`,
+      memory_id: `mem_${i - VECTOR_START}`, summary: `Codebase architecture step ${i - VECTOR_START}`,
       embedding: vector.map(x => Math.round(x / norm * 1000) / 1000), importance: i % 10 / 10 } };
   });
   const ids = [];
@@ -169,7 +189,7 @@ async function main() {
     const t = performance.now();
     const result = await request('/api/v1/records/bulk', { method: 'POST', body: records.slice(offset, offset + BATCH) });
     batches.push(performance.now() - t);
-    assert.equal(result.inserted, BATCH);
+    assert.equal(result.inserted, Math.min(BATCH, TOTAL - offset));
     ids.push(...result.records.map(record => record.id));
   }
   const ingestionMs = performance.now() - start;
@@ -185,10 +205,10 @@ async function main() {
   const scans = await measure(100, 5, async () => {
     const result = await request('/api/v1/records?collection=telemetry&limit=50');
     assert.equal(result.items.length, 50);
-    assert.equal(result.total, 5000);
+    assert.equal(result.total, TELEMETRY);
   });
   resourceSnapshot('after_scans');
-  const vector = Array.from({ length: 8 }, (_, d) => Math.sin(0.5 + d));
+  const vector = Array.from({ length: DIMENSIONS }, (_, d) => Math.sin(0.5 + d));
   const norm = Math.hypot(...vector);
   const vectors = await measure(100, 5, async () => {
     const result = await request('/api/v1/records/search', { method: 'POST', body: {
@@ -201,11 +221,56 @@ async function main() {
     "SELECT service, AVG(latency_ms) AS avg_latency FROM telemetry WHERE status = 'ok' GROUP BY service",
     'SELECT name, email, credits FROM customers ORDER BY credits DESC LIMIT 5',
   ];
-  const sql = await measure(30, 3, async i => {
-    const result = await request('/api/v1/query', { method: 'POST', body: { sql: queries[i % 3] } });
-    assert.equal(result.items.length, [3, 5, 5][i % 3]);
-    if (i % 3 === 0) assert.equal(result.items.reduce((sum, row) => sum + row.user_count, 0), 3000);
+  const customers = records.filter(record => record.collection === 'customers').map(record => record.data);
+  const customerGroups = new Map();
+  const telemetryGroups = new Map();
+  for (const customer of customers) {
+    const group = customerGroups.get(customer.plan) || { count: 0, sum: 0 };
+    group.count++; group.sum += customer.credits;
+    customerGroups.set(customer.plan, group);
+  }
+  for (const { collection, data } of records) {
+    if (collection !== 'telemetry' || data.status !== 'ok') continue;
+    const group = telemetryGroups.get(data.service) || { count: 0, sum: 0 };
+    group.count++; group.sum += data.latency_ms;
+    telemetryGroups.set(data.service, group);
+  }
+  const topCustomers = [...customers].sort((a, b) => b.credits - a.credits).slice(0, 5)
+    .map(({ name, email, credits }) => ({ name, email, credits }));
+  const sqlTimes = queries.map(() => []);
+  const sql = await measure(90, 9, async i => {
+    const queryIndex = i % queries.length;
+    const start = performance.now();
+    const result = await request('/api/v1/query', { method: 'POST', body: { sql: queries[queryIndex] } });
+    const elapsed = performance.now() - start;
+    assert.equal(result.items.length, [3, 5, 5][queryIndex]);
+    if (queryIndex === 0) {
+      assert.equal(new Set(result.items.map(row => row.plan)).size, customerGroups.size);
+      for (const row of result.items) {
+        const expected = customerGroups.get(row.plan);
+        assert.ok(expected);
+        assert.equal(row.user_count, expected.count);
+        assert.ok(Math.abs(row.avg_credits - expected.sum / expected.count) < 1e-9);
+      }
+    } else if (queryIndex === 1) {
+      assert.equal(new Set(result.items.map(row => row.service)).size, telemetryGroups.size);
+      for (const row of result.items) {
+        const expected = telemetryGroups.get(row.service);
+        assert.ok(expected);
+        assert.ok(Math.abs(row.avg_latency - expected.sum / expected.count) < 1e-9);
+      }
+    } else {
+      assert.deepEqual(result.items.map(row => row.credits), topCustomers.map(row => row.credits));
+      for (const row of result.items) {
+        const expected = customers.find(customer => customer.name === row.name);
+        assert.ok(expected);
+        assert.equal(row.email, expected.email);
+        assert.equal(row.credits, expected.credits);
+      }
+    }
+    sqlTimes[queryIndex].push(elapsed);
   });
+  const sqlByQuery = queries.map((query, i) => ({ query, ...summary(sqlTimes[i].slice(3)) }));
   resourceSnapshot('after_sql');
   await sleep(2000);
   const finalMemory = resourceSnapshot('idle_2s');
@@ -219,21 +284,21 @@ async function main() {
       logical_cpus: os.cpus().length, total_memory_bytes: os.totalmem(), node: process.version,
       build: SQLITE ? 'cargo build --release --locked --features sqlite-benchmark --bin sqlite-benchmark' : 'cargo build --release --locked', filesystem },
     methodology: { transport: 'HTTP over loopback, full response body parsed', concurrency: 1,
-      dataset_records: TOTAL, file_metadata_records: 4, collections: { telemetry: 5000, customers: 3000, ai_memories: 2000 },
-      vector_dimensions: 8, batch_size: BATCH, random_seed: 42, warmups: { lookups: 20, scans: 5, vectors: 5, sql: 3 },
+      dataset_records: TOTAL, file_metadata_records: 4, collections: { telemetry: TELEMETRY, customers: CUSTOMERS, ai_memories: TOTAL - VECTOR_START },
+      vector_dimensions: DIMENSIONS, batch_size: BATCH, random_seed: 42, warmups: { lookups: 20, scans: 5, vectors: 5, sql: 9 },
       sql_queries: queries, demos: false, llm_included: false, event_handlers: 0,
       ...(SQLITE ? { sqlite_journal_mode: 'WAL', sqlite_synchronous: 'FULL', adapter: 'Rust/Axum; typed SQLite tables for benchmark SQL; vector similarity computed in Rust after SQLite scan' } : {}) },
     ingestion: { total_ms: ingestionMs, records_per_second: TOTAL / (ingestionMs / 1000), batch_latency: summary(batches) },
-    latency: { point_lookup: lookups, collection_scan: scans, vector_search: vectors, sql, event_publish: events },
+    latency: { point_lookup: lookups, collection_scan: scans, vector_search: vectors, sql, sql_by_query: sqlByQuery, event_publish: events },
     storage: { total_bytes: bytesUnder(DATA), journal_bytes: SQLITE ? null : statSync(join(DATA, 'journal.jsonl')).size,
       file_payload_bytes: assets.reduce((sum, asset) => sum + asset.bytes.length, 0),
-      server_rss_bytes: finalMemory?.rust_rss_bytes ?? null, memory_stages: memory, rss_note: 'Stage snapshots include Rust and direct SQL child processes; peak applies to Rust only' },
+      server_rss_bytes: finalMemory?.rust_rss_bytes ?? null, memory_stages: memory, rss_note: 'Stage snapshots include Rust and direct SQL child processes; peak applies to Rust only; macOS peak and PSS unavailable' },
     verification: { unauthenticated_status: 401, file_sha256_verified: 4, inserted_records: ids.length,
       query_results_checked: true, failures: 0 },
   };
   mkdirSync(dirname(OUTPUT), { recursive: true });
   writeFileSync(OUTPUT, JSON.stringify(report, null, 2) + '\n');
-  console.table(Object.fromEntries(Object.entries(report.latency).map(([name, result]) => [name, {
+  console.table(Object.fromEntries(Object.entries(report.latency).filter(([, result]) => !Array.isArray(result)).map(([name, result]) => [name, {
     samples: result.samples, p50_ms: result.p50_ms.toFixed(2), p95_ms: result.p95_ms.toFixed(2), p99_ms: result.p99_ms.toFixed(2) }])));
   console.log(`Throughput: ${report.ingestion.records_per_second.toFixed(0)} records/s; data: ${(report.storage.total_bytes / 1048576).toFixed(2)} MiB.`);
   console.log(`Report saved to ${OUTPUT}. Temporary benchmark data is removed after shutdown.`);

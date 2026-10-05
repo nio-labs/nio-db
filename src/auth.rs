@@ -156,6 +156,7 @@ pub fn add_secret(path: &Path) -> io::Result<String> {
         });
     }
     replace(path, &AuthFile { principals })?;
+    clear_auth_cache();
     Ok(secret_token)
 }
 
@@ -208,7 +209,34 @@ fn authenticate_single(principals: &[Principal], bearer: &str) -> Option<Princip
         .cloned()
 }
 
+use std::collections::HashMap;
+use std::sync::{LazyLock, RwLock};
+
+static AUTH_CACHE: LazyLock<RwLock<HashMap<String, Option<Principal>>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
+
+pub fn clear_auth_cache() {
+    if let Ok(mut guard) = AUTH_CACHE.write() {
+        guard.clear();
+    }
+}
+
 pub fn authenticate(principals: &[Principal], bearer: &str) -> Option<Principal> {
+    if let Ok(guard) = AUTH_CACHE.read() {
+        if let Some(cached) = guard.get(bearer) {
+            return cached.clone();
+        }
+    }
+    let result = authenticate_uncached(principals, bearer);
+    if let Ok(mut guard) = AUTH_CACHE.write() {
+        if guard.len() < 1000 {
+            guard.insert(bearer.to_string(), result.clone());
+        }
+    }
+    result
+}
+
+fn authenticate_uncached(principals: &[Principal], bearer: &str) -> Option<Principal> {
     // If bearer is a combined token (client:secret or client.secret), verify both
     if let Some((t1, t2)) = bearer.split_once(':').or_else(|| bearer.split_once('.')) {
         if !t1.is_empty() && !t2.is_empty() {

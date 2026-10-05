@@ -408,30 +408,28 @@ NioDB provides zero-dependency, ultra-lightweight client SDKs:
 
 ## Benchmark
 
-Measured on **2026-10-05** with release builds on WSL2 Linux, an Intel Core Ultra 5 135H, 18 logical CPUs, 7.22 GiB RAM, Node 24.18.1, and an ext4 filesystem. The same authenticated loopback HTTP runner sent one request at a time to each server. It parsed every response and verified record counts, SQL results, and the SHA-256 hashes of four file downloads. The fixture contains 10,000 records: 5,000 telemetry, 3,000 customers, and 2,000 with 8-dimensional vectors, plus four file metadata records. Inserts use 20 transactions of 500 records. SQL uses two grouped aggregates and one sorted query. Reported read latencies include 20, 5, 5, and 3 warm-up requests for lookups, scans, vectors, and SQL, respectively.
+Measured on **2026-10-05** with release builds on an Apple M1 and macOS arm64. The authenticated loopback HTTP runner parses responses and validates records, SQL aggregate values, sorted results, and four file downloads. The default fixture has 10,000 records, 2,000 eight-dimensional embeddings, and 500-record batches. The figures below are medians across three independent runs, alternating engine order.
 
-| Operation | NioDB before changes | NioDB current | SQLite adapter |
-| --- | ---: | ---: | ---: |
-| Bulk ingestion, records/s | 324 | 13,311 | 29,808 |
-| Bulk batch P50, 500 records | 1,535 ms | 37.6 ms | 16.0 ms |
-| Record lookup by ID P50 | 2.15 ms | 1.92 ms | 1.88 ms |
-| Collection scan P50, 5,000 records, return 50 | 11.53 ms | 4.15 ms | 2.83 ms |
-| Vector search P50, 2,000 × 8D, top 10 | 5.67 ms | 3.33 ms | 7.09 ms |
-| SQL P50, grouped aggregates and sorted query | 274.28 ms | 31.41 ms | 2.67 ms |
+| Operation | NioDB | SQLite HTTP adapter |
+| --- | ---: | ---: |
+| Ingestion, records/s | 23,123 | 33,222 |
+| Lookup p50 | 0.240 ms | 0.179 ms |
+| Lookup p99 | 2.296 ms | 0.438 ms |
+| Collection scan p50, return 50 | 1.448 ms | 1.154 ms |
+| Vector search p50, top 10 | 0.747 ms | 4.836 ms |
+| SQL p50, three-query mix | 1.588 ms | 0.890 ms |
 
-The **before** and **current** NioDB columns ran the same benchmark script and fixture. The SQLite column uses a small Rust/Axum HTTP adapter in [src/bin/sqlite-benchmark.rs](src/bin/sqlite-benchmark.rs), with SQLite 3.46.1. It stores records in SQLite tables, uses `WAL` and `synchronous=FULL`, and commits each 500-record batch in one transaction. [SQLite documents](https://sqlite.org/pragma.html#pragma_synchronous) that this setting syncs the WAL after each transaction commit. The adapter computes exact vector similarity in Rust after scanning the SQLite rows; SQLite itself has no vector extension in this test. The adapter executes only the three measured SQL queries, using typed SQLite tables. These are **HTTP application comparisons**, not raw embedded SQLite timings or a claim that every feature has equivalent implementation. Event publishing is excluded from the comparison because the adapter only acknowledges an in-memory event and does not implement NioDB's worker, webhook, or SSE behavior. Neither server had event handlers or subscribers during the measured workload.
+The SQLite adapter uses WAL, `synchronous=FULL`, and typed tables for the three measured SQL queries. It computes exact vector similarity in Rust after scanning and parsing stored JSON; no SQLite vector extension is used. NioDB caches float embeddings and executes the measured SQL queries in Rust. A separate 768-dimensional comparison reports vector p50 of **4.84 ms versus 70.60 ms**, using 32-record batches for both engines to fit NioDB's JSON body limit.
 
-NioDB's current ingestion rate is about **41×** its previous rate in this run. The journal now commits each validated bulk batch as one checksummed frame and syncs once. One warm AlaSQL worker serves repeated SQL requests; a second starts on concurrent demand. Paged reads and vector search copy selected results rather than the entire workspace. NioDB's server RSS after SQL was **38.26 MiB**, plus **93.79 MiB** for its warm SQL worker; combined proportional set size after two idle seconds was **96.01 MiB**. SQLite adapter RSS after SQL was **12.30 MiB**, with **9.85 MiB** proportional set size. RSS snapshots are not peak memory, and process memory accounting varies by environment.
+SQLite remains faster on ingestion and SQL. NioDB's default-workload idle RSS is 28.92 MiB versus 16.23 MiB for the adapter. Native queries retain no Node worker; unsupported SQL starts an AlaSQL fallback worker on demand. Ingestion measures durable acknowledgement; background projection writes can continue during subsequent reads. These are HTTP application comparisons at concurrency 1, with substantial run-to-run variation, not general claims about SQLite performance. LLM calls and equivalent event delivery are outside the comparison.
 
-Natural-language/LLM requests, password hashing, concurrent clients, and remote network latency are outside this benchmark. Hardware, filesystem, cache state, and background activity can change the figures. See the complete [NioDB report](benchmarks/latest.json), [previous NioDB report](benchmarks/baseline-profile.json), [SQLite report](benchmarks/sqlite.json), and the detailed [SQLite benchmark analysis and optimization strategy](docs/SQLITE_BENCHMARK_ANALYSIS_AND_ROADMAP.md).
+See [the comparison and raw runs](benchmarks/comparison.json) and [the 768-dimensional comparison](benchmarks/vectors-768/comparison.json). The standalone [NioDB](benchmarks/latest.json) and [SQLite](benchmarks/sqlite.json) reports are the last individual runs.
 
 ### Reproduce
 
 ```sh
-cargo build --release --locked
-npm run benchmark
-cargo build --release --locked --features sqlite-benchmark --bin sqlite-benchmark
-npm run benchmark:sqlite
+cargo build --release --locked --features sqlite-benchmark --bins
+npm run benchmark:compare
 ```
 
 The runner creates and removes a separate temporary database on the repository filesystem; it does not modify your normal `nio-db` directory. It uses port 7488; set `NIODB_BENCHMARK_PORT` to use another port. Override either report path with `NIODB_BENCHMARK_OUTPUT`.

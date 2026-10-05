@@ -449,16 +449,40 @@ async fn sql_query(
     body.workspace_id = server_workspace(&app);
     authorize(&principal, &body.workspace_id, &id)?;
     let user_id = session.map(|s| s.user.id.clone());
-    let records = storage(&app, &id, move |store| {
-        Ok(store.snapshot_visible(&body.workspace_id, None, user_id.as_deref()))
-    })
-    .await?;
-    let result = app
-        .query
-        .execute(body.sql, body.parameters, &records, false)
-        .await
-        .map_err(|e| query_error(&id, e))?;
-    Ok(Json(json!({"items":result["items"],"engine":"alasql"})))
+    let table_hint = crate::query::extract_table_from_sql(&body.sql);
+    let collection_filter = match table_hint.as_deref() {
+        Some(tbl) if !tbl.eq_ignore_ascii_case("records") && !tbl.eq_ignore_ascii_case("artifacts") => Some(tbl.to_string()),
+        _ => None,
+    };
+    let sql = body.sql;
+    let parameters = body.parameters;
+    let ws = body.workspace_id;
+    let (native_res, fallback_records) = {
+        let store = app.store.lock().unwrap();
+        let refs = store.visible_refs(&ws, collection_filter.as_deref(), user_id.as_deref());
+        match crate::query::execute_native_sql_refs(&sql, &parameters, &refs, false) {
+            Ok(result) => (Ok(result), None),
+            Err(crate::query::NativeSqlError::QueryRejected) => (Err(true), None),
+            Err(crate::query::NativeSqlError::Unsupported) => {
+                (Err(false), Some(store.snapshot_visible(&ws, None, user_id.as_deref())))
+            }
+        }
+    };
+
+    match native_res {
+        Ok(mut res) => {
+            if let Value::Object(ref mut map) = res {
+                map.insert("engine".into(), Value::String("native".into()));
+            }
+            Ok(Json(res))
+        }
+        Err(true) => Err(error(&id, StatusCode::BAD_REQUEST, "query_rejected", "query rejected")),
+        Err(false) => {
+            let records = fallback_records.unwrap_or_default();
+            let fallback_res = app.query.execute(sql, parameters, &records, false).await.map_err(|e| query_error(&id, e))?;
+            Ok(Json(json!({"items": fallback_res["items"], "engine": "alasql"})))
+        }
+    }
 }
 async fn fallback(Extension(id): Extension<RequestId>) -> ApiError {
     error(
@@ -508,6 +532,27 @@ async fn list(
     Extension(id): Extension<RequestId>,
     session: Option<Extension<accounts::SessionIdentity>>,
     query: Result<Query<ListQuery>, QueryRejection>,
+) -> Result<Json<Value>, ApiError> {
+    list_impl(app, principal, id, session.map(|s| s.0), query, false).await
+}
+
+async fn list_records(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    Extension(id): Extension<RequestId>,
+    session: Option<Extension<accounts::SessionIdentity>>,
+    query: Result<Query<ListQuery>, QueryRejection>,
+) -> Result<Json<Value>, ApiError> {
+    list_impl(app, principal, id, session.map(|s| s.0), query, true).await
+}
+
+async fn list_impl(
+    app: App,
+    principal: Principal,
+    id: RequestId,
+    session: Option<accounts::SessionIdentity>,
+    query: Result<Query<ListQuery>, QueryRejection>,
+    is_records: bool,
 ) -> Result<Json<Value>, ApiError> {
     let mut query = query
         .map_err(|_| {
@@ -567,32 +612,27 @@ async fn list(
     let kind = query.kind.clone();
     let user_id = session.map(|s| s.user.id.clone());
     let limit = query.limit;
-    let page = storage(&app, &id, move |store| {
+    let (records, total, more) = {
+        let store = app.store.lock().unwrap();
         let anchor = cursor.as_ref().map(|c| (c.created_at.as_str(), c.id.as_str()));
-        Ok(store.page_visible(&workspace, kind.as_deref(), user_id.as_deref(), anchor, offset, limit))
-    }).await?.ok_or_else(|| error(&id, StatusCode::BAD_REQUEST, "invalid_cursor", "Cursor anchor is not visible"))?;
-    let (records, total, more) = page;
+        store.page_visible(&workspace, kind.as_deref(), user_id.as_deref(), anchor, offset, limit)
+    }.ok_or_else(|| error(&id, StatusCode::BAD_REQUEST, "invalid_cursor", "Cursor anchor is not visible"))?;
     let next_cursor = if more { records.last().map(|a| URL_SAFE_NO_PAD.encode(serde_json::to_vec(&Cursor {
         workspace_id: query.workspace_id, kind: query.kind, created_at: a.created_at.clone(), id: a.id.clone()
     }).unwrap())) } else { None };
-    Ok(Json(json!({"items":records.iter().map(public_value).collect::<Vec<_>>(), "next_cursor":next_cursor,
-        "total":total,"page":current_page,"total_pages":total.div_ceil(limit).max(1),"limit":limit})))
-}
-
-async fn list_records(
-    app: State<App>,
-    principal: Extension<Principal>,
-    id: Extension<RequestId>,
-    session: Option<Extension<accounts::SessionIdentity>>,
-    query: Result<Query<ListQuery>, QueryRejection>,
-) -> Result<Json<Value>, ApiError> {
-    let Json(mut page) = list(app, principal, id, session, query).await?;
-    if let Some(items) = page.get_mut("items").and_then(Value::as_array_mut) {
-        for item in items {
-            *item = record_value(std::mem::take(item));
-        }
-    }
-    Ok(Json(page))
+    let key_field = if is_records { "collection" } else { "type" };
+    let items: Vec<Value> = records.iter().map(|a| {
+        let mut m = Map::with_capacity(6);
+        m.insert("id".into(), Value::String(a.id.clone()));
+        m.insert(key_field.into(), Value::String(a.kind.clone()));
+        m.insert("data".into(), Value::Object(a.data.clone()));
+        m.insert("revision".into(), Value::Number(a.revision.into()));
+        m.insert("created_at".into(), Value::String(a.created_at.clone()));
+        m.insert("updated_at".into(), Value::String(a.updated_at.clone()));
+        Value::Object(m)
+    }).collect();
+    Ok(Json(json!({"items": items, "next_cursor": next_cursor,
+        "total": total, "page": current_page, "total_pages": total.div_ceil(limit).max(1), "limit": limit})))
 }
 
 #[derive(Deserialize)]
@@ -622,10 +662,10 @@ async fn read(
     query.workspace_id = server_workspace(&app);
     authorize(&principal, &query.workspace_id, &id)?;
     let user_id = session.map(|s| s.user.id.clone());
-    let result = storage(&app, &id, move |store| {
-        Ok(store.get_visible(&query.workspace_id, &artifact_id, user_id.as_deref()))
-    })
-    .await?;
+    let result = {
+        let store = app.store.lock().unwrap();
+        store.get_visible(&query.workspace_id, &artifact_id, user_id.as_deref())
+    };
     result
         .map(|record| Json(public_value(&record)))
         .ok_or_else(|| {
@@ -639,15 +679,49 @@ async fn read(
 }
 
 async fn read_record(
-    app: State<App>,
-    principal: Extension<Principal>,
-    id: Extension<RequestId>,
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    Extension(id): Extension<RequestId>,
     session: Option<Extension<accounts::SessionIdentity>>,
-    record_id: Path<String>,
+    Path(record_id): Path<String>,
     query: Result<Query<WorkspaceQuery>, QueryRejection>,
 ) -> Result<Json<Value>, ApiError> {
-    let Json(record) = read(app, principal, id, session, record_id, query).await?;
-    Ok(Json(record_value(record)))
+    let mut query = query
+        .map_err(|_| {
+            error(
+                &id,
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "Invalid request parameters",
+            )
+        })?
+        .0;
+    query.workspace_id = server_workspace(&app);
+    authorize(&principal, &query.workspace_id, &id)?;
+    let user_id = session.map(|s| s.user.id.clone());
+    let result = {
+        let store = app.store.lock().unwrap();
+        store.get_visible(&query.workspace_id, &record_id, user_id.as_deref())
+    };
+    result
+        .map(|record| {
+            let mut m = Map::with_capacity(6);
+            m.insert("id".into(), Value::String(record.id));
+            m.insert("collection".into(), Value::String(record.kind));
+            m.insert("data".into(), Value::Object(record.data));
+            m.insert("revision".into(), Value::Number(record.revision.into()));
+            m.insert("created_at".into(), Value::String(record.created_at));
+            m.insert("updated_at".into(), Value::String(record.updated_at));
+            Json(Value::Object(m))
+        })
+        .ok_or_else(|| {
+            error(
+                &id,
+                StatusCode::NOT_FOUND,
+                "not_found",
+                "Record not found in this database",
+            )
+        })
 }
 
 #[derive(Deserialize)]
@@ -977,12 +1051,32 @@ async fn bulk_records_handler(
                     insert_items.push((kind, data));
                 }
             }
-            let res = storage(&app, &id, move |store| {
-                store.bulk_insert(&workspace, None, insert_items)
-            })
-            .await?;
+            let res = {
+                let mut store = app
+                    .store
+                    .lock()
+                    .map_err(|_| error(&id, StatusCode::SERVICE_UNAVAILABLE, "database_unavailable", "Database lock poisoned"))?;
+                if !store.healthy {
+                    return Err(error(&id, StatusCode::SERVICE_UNAVAILABLE, "database_unavailable", "Database unhealthy"));
+                }
+                store.bulk_insert(&workspace, None, insert_items).map_err(|err| match err.kind() {
+                    std::io::ErrorKind::AlreadyExists => error(&id, StatusCode::CONFLICT, "idempotency_conflict", "Idempotency key was reused with different data"),
+                    std::io::ErrorKind::InvalidInput if matches!(err.to_string().as_str(), "invalid collection name" | "TTL is out of range") => error(
+                        &id, StatusCode::BAD_REQUEST, "invalid_record", if err.to_string() == "invalid collection name" { "Invalid collection name" } else { "TTL is out of range" },
+                    ),
+                    std::io::ErrorKind::InvalidInput => error(&id, StatusCode::PAYLOAD_TOO_LARGE, "record_too_large", "Record data exceeds 16 MiB"),
+                    _ => error(&id, StatusCode::SERVICE_UNAVAILABLE, "database_unavailable", "Database operation failed"),
+                })?
+            };
             for art in res {
-                inserted_records.push(record_value(public_value(&art)));
+                let mut m = Map::with_capacity(6);
+                m.insert("id".into(), Value::String(art.id));
+                m.insert("collection".into(), Value::String(art.kind));
+                m.insert("data".into(), Value::Object(art.data));
+                m.insert("revision".into(), Value::Number(art.revision.into()));
+                m.insert("created_at".into(), Value::String(art.created_at));
+                m.insert("updated_at".into(), Value::String(art.updated_at));
+                inserted_records.push(Value::Object(m));
             }
         }
         Value::Object(obj) => {
@@ -1923,17 +2017,17 @@ async fn search_records_vector(
         ));
     }
     let user_id = session.map(|s| s.user.id.clone());
-    let ws_clone = ws.clone();
-    let results = storage(&app, &id, move |store| {
-        Ok(store.search_vectors(
-            &ws_clone,
+    let results = {
+        let store = app.store.lock().unwrap();
+        store.search_vectors(
+            &ws,
             body.collection.as_deref(),
             &body.vector,
             body.top_k,
             body.min_score,
             user_id.as_deref(),
-        ))
-    }).await?;
+        )
+    };
 
     let items: Vec<Value> = results
         .into_iter()

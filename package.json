@@ -1,6 +1,6 @@
 {
   "name": "@nio-labs/nio-db",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "NioDB \u2014 The Agentic DB that works. A lightweight database with natural-language queries, powered by Nio.",
   "license": "MIT",
   "bin": {
@@ -28,6 +28,7 @@
     "test": "npm run check:launcher && npm run check:sql && npm run check:sdk",
     "benchmark": "node scripts/simulate-and-benchmark.cjs",
     "benchmark:sqlite": "node scripts/simulate-and-benchmark.cjs --sqlite",
+    "benchmark:compare": "node scripts/compare-sqlite.cjs",
     "seed:extras": "node scripts/seed-events-users.cjs",
     "seed:handlers": "node scripts/seed-event-handlers.cjs",
     "publish:all": "node scripts/publish-all.cjs"
@@ -37,12 +38,12 @@
     "@nio-labs/nio-ai": "0.3.3"
   },
   "optionalDependencies": {
-    "@nio-labs/nio-db-darwin-arm64": "1.0.1",
-    "@nio-labs/nio-db-darwin-x64": "1.0.1",
-    "@nio-labs/nio-db-linux-arm64": "1.0.1",
-    "@nio-labs/nio-db-linux-x64": "1.0.1",
-    "@nio-labs/nio-db-win32-arm64": "1.0.1",
-    "@nio-labs/nio-db-win32-x64": "1.0.1"
+    "@nio-labs/nio-db-darwin-arm64": "1.0.2",
+    "@nio-labs/nio-db-darwin-x64": "1.0.2",
+    "@nio-labs/nio-db-linux-arm64": "1.0.2",
+    "@nio-labs/nio-db-linux-x64": "1.0.2",
+    "@nio-labs/nio-db-win32-arm64": "1.0.2",
+    "@nio-labs/nio-db-win32-x64": "1.0.2"
   },
   "publishConfig": {
     "access": "public"

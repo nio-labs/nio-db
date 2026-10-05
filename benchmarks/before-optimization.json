@@ -1,0 +1,113 @@
+{
+  "measured_at": "2026-10-05T13:54:02.026Z",
+  "engine": "NioDB",
+  "engine_version": "1.0.1",
+  "binary_sha256": "e91f2b05c5c5dc3aebde3e8009ce3c4141d04fae0ecc82d004549fc8301e2f12",
+  "version": "1.0.1",
+  "environment": {
+    "os": "Darwin 25.3.0",
+    "arch": "arm64",
+    "cpu": "Apple M1",
+    "logical_cpus": 8,
+    "total_memory_bytes": 8589934592,
+    "node": "v22.21.1",
+    "build": "cargo build --release --locked"
+  },
+  "methodology": {
+    "transport": "HTTP over loopback, full response body parsed",
+    "concurrency": 1,
+    "dataset_records": 10000,
+    "file_metadata_records": 4,
+    "collections": {
+      "telemetry": 5000,
+      "customers": 3000,
+      "ai_memories": 2000
+    },
+    "vector_dimensions": 8,
+    "batch_size": 500,
+    "random_seed": 42,
+    "warmups": {
+      "lookups": 20,
+      "scans": 5,
+      "vectors": 5,
+      "sql": 3
+    },
+    "sql_queries": [
+      "SELECT plan, COUNT(*) AS user_count, AVG(credits) AS avg_credits FROM customers GROUP BY plan",
+      "SELECT service, AVG(latency_ms) AS avg_latency FROM telemetry WHERE status = 'ok' GROUP BY service",
+      "SELECT name, email, credits FROM customers ORDER BY credits DESC LIMIT 5"
+    ],
+    "demos": false,
+    "llm_included": false,
+    "event_handlers": 0
+  },
+  "ingestion": {
+    "total_ms": 557.85,
+    "records_per_second": 17925.965761405394,
+    "batch_latency": {
+      "samples": 20,
+      "mean_ms": 27.860372949999988,
+      "p50_ms": 24.499041000000034,
+      "p95_ms": 55.08408399999996,
+      "p99_ms": 87.49254199999996,
+      "max_ms": 87.49254199999996
+    }
+  },
+  "latency": {
+    "point_lookup": {
+      "samples": 1000,
+      "mean_ms": 0.2637840399999991,
+      "p50_ms": 0.1814999999999145,
+      "p95_ms": 0.61912499999994,
+      "p99_ms": 2.0052089999999225,
+      "max_ms": 5.023249999999962
+    },
+    "collection_scan": {
+      "samples": 100,
+      "mean_ms": 1.5776054300000033,
+      "p50_ms": 1.4477500000000418,
+      "p95_ms": 2.3798329999999623,
+      "p99_ms": 2.506291999999803,
+      "max_ms": 3.08720900000003
+    },
+    "vector_search": {
+      "samples": 100,
+      "mean_ms": 0.8145316800000092,
+      "p50_ms": 0.7360830000000078,
+      "p95_ms": 1.310416000000032,
+      "p99_ms": 1.6877090000000408,
+      "max_ms": 1.7958750000000236
+    },
+    "sql": {
+      "samples": 30,
+      "mean_ms": 2.069481966666664,
+      "p50_ms": 1.8959159999999429,
+      "p95_ms": 3.3356249999999363,
+      "p99_ms": 3.833750000000009,
+      "max_ms": 3.833750000000009
+    },
+    "event_publish": {
+      "samples": 50,
+      "mean_ms": 0.3479025000000013,
+      "p50_ms": 0.3053329999999619,
+      "p95_ms": 0.6930409999999938,
+      "p99_ms": 0.805499999999995,
+      "max_ms": 0.805499999999995
+    }
+  },
+  "storage": {
+    "total_bytes": 7775879,
+    "journal_bytes": 4085167,
+    "file_payload_bytes": 65746,
+    "server_rss_bytes": null,
+    "memory_stages": [],
+    "rss_note": "Stage snapshots include Rust and direct SQL child processes; peak applies to Rust only"
+  },
+  "verification": {
+    "unauthenticated_status": 401,
+    "file_sha256_verified": 4,
+    "inserted_records": 10000,
+    "query_results_checked": true,
+    "failures": 0
+  }
+}

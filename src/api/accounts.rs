@@ -87,14 +87,15 @@ async fn password_work<T: Send + 'static>(
     id: &RequestId,
     work: impl FnOnce() -> T + Send + 'static,
 ) -> Result<T, ApiError> {
-    let permit = PASSWORD_CAPACITY.clone().try_acquire_owned().map_err(|_| {
-        error(
+    let permit = match tokio::time::timeout(std::time::Duration::from_millis(500), PASSWORD_CAPACITY.clone().acquire_owned()).await {
+        Ok(Ok(p)) => p,
+        _ => return Err(error(
             id,
             StatusCode::TOO_MANY_REQUESTS,
             "auth_busy",
             "Authentication capacity is occupied",
-        )
-    })?;
+        )),
+    };
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
         work()

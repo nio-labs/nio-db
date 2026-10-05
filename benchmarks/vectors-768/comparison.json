@@ -1,0 +1,265 @@
+{
+  "measured_at": "2026-10-05T14:14:58.022Z",
+  "repetitions": 2,
+  "methodology": "Sequential HTTP workloads, alternating engine order; median/min/max across independent runs. Read tests follow ingestion and may overlap background projections.",
+  "run_files": {
+    "niodb": [
+      "comparison/niodb-1.json",
+      "comparison/niodb-2.json"
+    ],
+    "sqlite": [
+      "comparison/sqlite-1.json",
+      "comparison/sqlite-2.json"
+    ]
+  },
+  "niodb": {
+    "records_per_second": {
+      "median": 2843.986009437017,
+      "min": 2694.220277833384,
+      "max": 2993.7517410406494
+    },
+    "latency": {
+      "point_lookup": {
+        "p50_ms": {
+          "median": 0.2320830000001024,
+          "min": 0.16170800000008967,
+          "max": 0.30245800000011513
+        },
+        "p95_ms": {
+          "median": 0.42570850000015525,
+          "min": 0.3085420000002159,
+          "max": 0.5428750000000946
+        },
+        "p99_ms": {
+          "median": 0.6450210000000425,
+          "min": 0.5229999999996835,
+          "max": 0.7670420000004015
+        }
+      },
+      "collection_scan": {
+        "p50_ms": {
+          "median": 1.7420004999999037,
+          "min": 1.321208999999726,
+          "max": 2.1627920000000813
+        },
+        "p95_ms": {
+          "median": 2.6491039999996246,
+          "min": 2.201000000000022,
+          "max": 3.0972079999992275
+        },
+        "p99_ms": {
+          "median": 3.4195624999993015,
+          "min": 2.7080419999992955,
+          "max": 4.1310829999993075
+        }
+      },
+      "vector_search": {
+        "p50_ms": {
+          "median": 4.838187500000004,
+          "min": 3.8424580000000788,
+          "max": 5.8339169999999285
+        },
+        "p95_ms": {
+          "median": 5.389166999999816,
+          "min": 4.361791999999696,
+          "max": 6.416541999999936
+        },
+        "p99_ms": {
+          "median": 5.54452050000009,
+          "min": 4.4655830000001515,
+          "max": 6.623458000000028
+        }
+      },
+      "sql": {
+        "p50_ms": {
+          "median": 2.235541999999896,
+          "min": 1.6564589999998134,
+          "max": 2.814624999999978
+        },
+        "p95_ms": {
+          "median": 3.222812000000431,
+          "min": 2.695958000000246,
+          "max": 3.749666000000616
+        },
+        "p99_ms": {
+          "median": 3.528479000000061,
+          "min": 2.9917500000001382,
+          "max": 4.065207999999984
+        }
+      },
+      "event_publish": {
+        "p50_ms": {
+          "median": 0.3388335000000211,
+          "min": 0.32487500000002,
+          "max": 0.3527920000000222
+        },
+        "p95_ms": {
+          "median": 0.7051250000000095,
+          "min": 0.6992079999999987,
+          "max": 0.7110420000000204
+        },
+        "p99_ms": {
+          "median": 0.8778335000000084,
+          "min": 0.861582999999996,
+          "max": 0.8940840000000208
+        }
+      }
+    },
+    "sql_by_query": [
+      {
+        "query": "SELECT plan, COUNT(*) AS user_count, AVG(credits) AS avg_credits FROM customers GROUP BY plan",
+        "p50_ms": {
+          "median": 1.6030829999999696,
+          "min": 1.2307499999997162,
+          "max": 1.975416000000223
+        }
+      },
+      {
+        "query": "SELECT service, AVG(latency_ms) AS avg_latency FROM telemetry WHERE status = 'ok' GROUP BY service",
+        "p50_ms": {
+          "median": 2.667395999999826,
+          "min": 2.0418339999996533,
+          "max": 3.2929579999999987
+        }
+      },
+      {
+        "query": "SELECT name, email, credits FROM customers ORDER BY credits DESC LIMIT 5",
+        "p50_ms": {
+          "median": 1.8669795000000704,
+          "min": 1.4454999999998108,
+          "max": 2.28845900000033
+        }
+      }
+    ],
+    "server_rss_bytes": {
+      "median": 91922432,
+      "min": 91668480,
+      "max": 92176384
+    }
+  },
+  "sqlite": {
+    "records_per_second": {
+      "median": 6905.556617603348,
+      "min": 6816.071932548135,
+      "max": 6995.041302658562
+    },
+    "latency": {
+      "point_lookup": {
+        "p50_ms": {
+          "median": 0.20506249999993997,
+          "min": 0.17320799999993142,
+          "max": 0.23691699999994853
+        },
+        "p95_ms": {
+          "median": 0.3848960000000261,
+          "min": 0.3332500000001346,
+          "max": 0.4365419999999176
+        },
+        "p99_ms": {
+          "median": 0.5011245000000599,
+          "min": 0.4337910000001557,
+          "max": 0.5684579999999642
+        }
+      },
+      "collection_scan": {
+        "p50_ms": {
+          "median": 1.240583499999957,
+          "min": 1.0332499999999527,
+          "max": 1.4479169999999613
+        },
+        "p95_ms": {
+          "median": 1.7631455000000642,
+          "min": 1.6480830000000424,
+          "max": 1.878208000000086
+        },
+        "p99_ms": {
+          "median": 2.1159999999999854,
+          "min": 2.007000000000062,
+          "max": 2.224999999999909
+        }
+      },
+      "vector_search": {
+        "p50_ms": {
+          "median": 70.60441650000007,
+          "min": 60.396000000000186,
+          "max": 80.81283299999996
+        },
+        "p95_ms": {
+          "median": 83.64502049999919,
+          "min": 82.85383299999921,
+          "max": 84.43620799999917
+        },
+        "p99_ms": {
+          "median": 84.1960210000002,
+          "min": 83.51679200000035,
+          "max": 84.87525000000005
+        }
+      },
+      "sql": {
+        "p50_ms": {
+          "median": 1.1374789999999848,
+          "min": 1.1291660000006232,
+          "max": 1.1457919999993464
+        },
+        "p95_ms": {
+          "median": 2.0922295000000304,
+          "min": 2.0895000000000437,
+          "max": 2.094959000000017
+        },
+        "p99_ms": {
+          "median": 2.556020500000159,
+          "min": 2.2896660000005795,
+          "max": 2.822374999999738
+        }
+      },
+      "event_publish": {
+        "p50_ms": {
+          "median": 0.3205625000000012,
+          "min": 0.31537500000000307,
+          "max": 0.3257499999999993
+        },
+        "p95_ms": {
+          "median": 0.754249999999999,
+          "min": 0.727249999999998,
+          "max": 0.78125
+        },
+        "p99_ms": {
+          "median": 0.8700419999999909,
+          "min": 0.8239589999999737,
+          "max": 0.9161250000000081
+        }
+      }
+    },
+    "sql_by_query": [
+      {
+        "query": "SELECT plan, COUNT(*) AS user_count, AVG(credits) AS avg_credits FROM customers GROUP BY plan",
+        "p50_ms": {
+          "median": 1.1302290000003268,
+          "min": 1.1187499999996362,
+          "max": 1.1417080000010174
+        }
+      },
+      {
+        "query": "SELECT service, AVG(latency_ms) AS avg_latency FROM telemetry WHERE status = 'ok' GROUP BY service",
+        "p50_ms": {
+          "median": 1.8678540000000794,
+          "min": 1.8312079999996058,
+          "max": 1.904500000000553
+        }
+      },
+      {
+        "query": "SELECT name, email, credits FROM customers ORDER BY credits DESC LIMIT 5",
+        "p50_ms": {
+          "median": 0.6595004999999219,
+          "min": 0.6419589999986783,
+          "max": 0.6770420000011654
+        }
+      }
+    ],
+    "server_rss_bytes": {
+      "median": 37052416,
+      "min": 37044224,
+      "max": 37060608
+    }
+  }
+}

@@ -1,10 +1,10 @@
 use chrono::Utc;
-use rand::{RngCore, rngs::OsRng};
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fs::{self, File, OpenOptions},
     io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
@@ -29,7 +29,7 @@ pub fn valid_bucket(name: &str) -> bool {
 
 pub fn new_id(prefix: &str) -> String {
     let mut bytes = [0u8; 16];
-    OsRng.fill_bytes(&mut bytes);
+    rand::thread_rng().fill_bytes(&mut bytes);
     format!("{prefix}_{}", hex(&bytes))
 }
 
@@ -38,6 +38,27 @@ mod tests {
     use super::*;
     use crate::test_support::Directory;
     use serde_json::json;
+
+    #[test]
+    fn cached_vectors_follow_updates_visibility_deletes_and_recovery() {
+        let directory = Directory::new();
+        let mut store = Store::open(&directory.0).unwrap();
+        let record = store.create("a", "vectors".into(), json!({"embedding":[1.0,0.0],"owner_id":"alice"}).as_object().unwrap().clone(), None).unwrap();
+        assert!(store.search_vectors("a", Some("vectors"), &[1.0,0.0], 10, None, Some("bob")).is_empty());
+        assert_eq!(store.search_vectors("a", Some("vectors"), &[1.0,0.0], 10, None, Some("alice"))[0].1, 1.0);
+        store.update("a", &record.id, json!({"embedding":[0.0,1.0]}).as_object().unwrap().clone(), true, Some("alice")).unwrap();
+        assert!(store.search_vectors("a", Some("vectors"), &[1.0,0.0], 10, Some(0.5), None).is_empty());
+        drop(store);
+        let mut store = Store::open(&directory.0).unwrap();
+        assert_eq!(store.search_vectors("a", Some("vectors"), &[0.0,1.0], 1, None, None)[0].1, 1.0);
+        assert!(store.search_vectors("a", Some("vectors"), &[0.0,1.0], 0, None, None).is_empty());
+        store.update("a", &record.id, json!({"embedding":["bad",1]}).as_object().unwrap().clone(), true, None).unwrap();
+        assert!(!store.vector_index.contains_key(&record.id));
+        store.update("a", &record.id, json!({"embedding":[0,0]}).as_object().unwrap().clone(), true, None).unwrap();
+        assert_eq!(store.search_vectors("a", Some("vectors"), &[0.0,1.0], 1, None, None)[0].1, 0.0);
+        store.delete("a", &record.id, None).unwrap();
+        assert!(store.vector_index.is_empty());
+    }
 
     #[test]
     fn bulk_frame_is_atomic_recovers_and_repairs_derived_projections() {
@@ -243,9 +264,16 @@ mod tests {
 }
 
 pub fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for &byte in bytes {
+        output.push(DIGITS[(byte >> 4) as usize] as char);
+        output.push(DIGITS[(byte & 15) as usize] as char);
+    }
+    output
 }
 
+#[inline]
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     if a.len() != b.len() || a.is_empty() {
         return 0.0;
@@ -253,15 +281,16 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     let mut dot = 0.0f32;
     let mut norm_a = 0.0f32;
     let mut norm_b = 0.0f32;
-    for i in 0..a.len() {
-        dot += a[i] * b[i];
-        norm_a += a[i] * a[i];
-        norm_b += b[i] * b[i];
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        dot += x * y;
+        norm_a += x * x;
+        norm_b += y * y;
     }
-    if norm_a == 0.0 || norm_b == 0.0 {
+    let norm = norm_a * norm_b;
+    if norm <= 0.0 {
         return 0.0;
     }
-    dot / (norm_a.sqrt() * norm_b.sqrt())
+    dot / norm.sqrt()
 }
 
 pub fn secure_dir(path: &Path) -> io::Result<()> {
@@ -459,11 +488,28 @@ struct Entry {
     sha256: String,
 }
 
+struct CachedVector {
+    values: Vec<f32>,
+    norm: f32,
+}
+
+impl CachedVector {
+    fn from_artifact(artifact: &Artifact) -> Option<Self> {
+        let embedding = artifact.data.get("embedding").or_else(|| artifact.data.get("vector"))?.as_array()?;
+        if embedding.is_empty() { return None; }
+        let values: Vec<f32> = embedding.iter().map(|value| value.as_f64().map(|n| n as f32)).collect::<Option<_>>()?;
+        let norm = values.iter().map(|value| value * value).sum::<f32>();
+        Some(Self { values, norm })
+    }
+}
+
 pub struct Store {
     root: PathBuf,
     _lock: File,
     journal: File,
     artifacts: BTreeMap<String, Arc<Artifact>>,
+    collection_index: HashMap<String, HashMap<String, Vec<Arc<Artifact>>>>,
+    vector_index: HashMap<String, CachedVector>,
     conversations: BTreeMap<String, Conversation>,
     idempotency: BTreeMap<String, (String, String)>,
     users: BTreeMap<String, UserRecord>,
@@ -506,6 +552,8 @@ impl Store {
             _lock: lock,
             journal,
             artifacts: BTreeMap::new(),
+            collection_index: HashMap::new(),
+            vector_index: HashMap::new(),
             conversations: BTreeMap::new(),
             idempotency: BTreeMap::new(),
             users: BTreeMap::new(),
@@ -630,10 +678,31 @@ impl Store {
                     self.idempotency
                         .insert(key, (fingerprint, artifact.id.clone()));
                 }
-                self.artifacts.insert(artifact.id.clone(), Arc::new(artifact));
+                if let Some(vector) = CachedVector::from_artifact(&artifact) {
+                    self.vector_index.insert(artifact.id.clone(), vector);
+                } else {
+                    self.vector_index.remove(&artifact.id);
+                }
+                let artifact = Arc::new(artifact);
+                if let Some(old) = self.artifacts.insert(artifact.id.clone(), Arc::clone(&artifact)) {
+                    if let Some(kinds) = self.collection_index.get_mut(&old.workspace_id) {
+                        if let Some(list) = kinds.get_mut(&old.kind) {
+                            list.retain(|a| a.id != old.id);
+                        }
+                    }
+                }
+                self.collection_index.entry(artifact.workspace_id.clone()).or_default()
+                    .entry(artifact.kind.clone()).or_default().push(Arc::clone(&artifact));
             }
             Event::ArtifactDeleted { id } => {
-                self.artifacts.remove(&id);
+                self.vector_index.remove(&id);
+                if let Some(old) = self.artifacts.remove(&id) {
+                    if let Some(kinds) = self.collection_index.get_mut(&old.workspace_id) {
+                        if let Some(list) = kinds.get_mut(&old.kind) {
+                            list.retain(|a| a.id != id);
+                        }
+                    }
+                }
                 self.idempotency.retain(|_, (_, art_id)| art_id != &id);
             }
             Event::Conversation { conversation } => {
@@ -656,7 +725,14 @@ impl Store {
                     .collect();
                 for file_id in file_ids {
                     if let Some(file) = self.files.remove(&file_id) {
-                        self.artifacts.remove(&file.artifact_id);
+                        if let Some(old) = self.artifacts.remove(&file.artifact_id) {
+                            self.vector_index.remove(&file.artifact_id);
+                            if let Some(kinds) = self.collection_index.get_mut(&old.workspace_id) {
+                                if let Some(list) = kinds.get_mut(&old.kind) {
+                                    list.retain(|a| a.id != file.artifact_id);
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -671,12 +747,33 @@ impl Store {
                     .insert((bucket.workspace_id.clone(), bucket.name.clone()), bucket);
             }
             Event::FileUploaded { file, artifact } => {
-                self.artifacts.insert(artifact.id.clone(), Arc::new(artifact));
+                if let Some(vector) = CachedVector::from_artifact(&artifact) {
+                    self.vector_index.insert(artifact.id.clone(), vector);
+                } else {
+                    self.vector_index.remove(&artifact.id);
+                }
+                let artifact = Arc::new(artifact);
+                if let Some(old) = self.artifacts.insert(artifact.id.clone(), Arc::clone(&artifact)) {
+                    if let Some(kinds) = self.collection_index.get_mut(&old.workspace_id) {
+                        if let Some(list) = kinds.get_mut(&old.kind) {
+                            list.retain(|a| a.id != old.id);
+                        }
+                    }
+                }
+                self.collection_index.entry(artifact.workspace_id.clone()).or_default()
+                    .entry(artifact.kind.clone()).or_default().push(Arc::clone(&artifact));
                 self.files.insert(file.id.clone(), file);
             }
             Event::FileDeleted { id } => {
                 if let Some(file) = self.files.remove(&id) {
-                    self.artifacts.remove(&file.artifact_id);
+                    if let Some(old) = self.artifacts.remove(&file.artifact_id) {
+                        self.vector_index.remove(&file.artifact_id);
+                        if let Some(kinds) = self.collection_index.get_mut(&old.workspace_id) {
+                            if let Some(list) = kinds.get_mut(&old.kind) {
+                                list.retain(|a| a.id != file.artifact_id);
+                            }
+                        }
+                    }
                 }
             }
             Event::WorkerCreated { worker } => {
@@ -704,16 +801,16 @@ impl Store {
             ));
         }
         let payload = serde_json::to_value(&event).map_err(io::Error::other)?;
-        let sha256 = hex(&Sha256::digest(
-            serde_json::to_vec(&payload).map_err(io::Error::other)?,
-        ));
-        let mut frame = serde_json::to_vec(&Entry {
-            version: 1,
-            payload,
-            sha256,
-        })
-        .map_err(io::Error::other)?;
-        frame.push(b'\n');
+        // Keep the canonical Value serialization used by replay, but reuse its
+        // bytes in the frame instead of serializing the entire payload twice.
+        let payload = serde_json::to_vec(&payload).map_err(io::Error::other)?;
+        let sha256 = hex(&Sha256::digest(&payload));
+        let mut frame = Vec::with_capacity(payload.len() + 104);
+        frame.extend_from_slice(b"{\"version\":1,\"payload\":");
+        frame.extend_from_slice(&payload);
+        frame.extend_from_slice(b",\"sha256\":\"");
+        frame.extend_from_slice(sha256.as_bytes());
+        frame.extend_from_slice(b"\"}\n");
         if self.journal.metadata()?.len() + frame.len() as u64 > MAX_JOURNAL_BYTES {
             return Err(io::Error::other(
                 "initial storage limit reached; export before continuing",
@@ -722,7 +819,7 @@ impl Store {
         if let Err(error) = self
             .journal
             .write_all(&frame)
-            .and_then(|_| self.journal.sync_all())
+            .and_then(|_| self.journal.sync_data())
         {
             self.healthy = false;
             return Err(error);
@@ -738,15 +835,19 @@ impl Store {
     fn write_projection(&self, artifact: &Artifact, durable: bool) -> io::Result<()> {
         let destination = self.root.join("artifacts").join(format!("{}.toon", artifact.id));
         let output = crate::toon::encode(&serde_json::to_value(artifact).map_err(io::Error::other)?);
-        if destination.exists() && fs::read(&destination)? == output.as_bytes() {
-            return Ok(());
+        if durable {
+            if destination.exists() && fs::read(&destination)? == output.as_bytes() {
+                return Ok(());
+            }
+            let temporary = self.root.join("artifacts").join(format!("{}.tmp", new_id("projection")));
+            let mut file = private_file(&temporary, true)?;
+            file.write_all(output.as_bytes())?;
+            file.sync_all()?;
+            fs::rename(&temporary, &destination)?;
+            sync_dir(&self.root.join("artifacts"))?;
+        } else {
+            fs::write(&destination, output.as_bytes())?;
         }
-        let temporary = self.root.join("artifacts").join(format!("{}.tmp", new_id("projection")));
-        let mut file = private_file(&temporary, true)?;
-        file.write_all(output.as_bytes())?;
-        if durable { file.sync_all()?; }
-        fs::rename(&temporary, &destination)?;
-        if durable { sync_dir(&self.root.join("artifacts"))?; }
         Ok(())
     }
 
@@ -850,17 +951,19 @@ impl Store {
         user_id: Option<&str>,
         owned_files: Option<&BTreeMap<&str, &str>>,
     ) -> bool {
-        let file_owner = if let Some(owned_files) = owned_files {
-            owned_files.get(artifact.id.as_str()).copied()
-        } else {
-            self.files
-                .values()
-                .find(|f| f.artifact_id == artifact.id)
-                .and_then(|f| f.user_id.as_deref())
-        };
+        if artifact.kind == "files" {
+            let file_owner = if let Some(owned_files) = owned_files {
+                owned_files.get(artifact.id.as_str()).copied()
+            } else {
+                self.files
+                    .values()
+                    .find(|f| f.artifact_id == artifact.id)
+                    .and_then(|f| f.user_id.as_deref())
+            };
 
-        if let Some(owner) = file_owner {
-            return Some(owner) == user_id;
+            if let Some(owner) = file_owner {
+                return Some(owner) == user_id;
+            }
         }
 
         let Some(user_id) = user_id else {
@@ -1009,14 +1112,14 @@ impl Store {
     ) -> io::Result<Vec<Artifact>> {
         let mut results = Vec::with_capacity(items.len());
         let mut events = Vec::with_capacity(items.len());
+        let now = Utc::now();
+        let timestamp = now.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
         // Validate and stage everything before writing the single commit frame.
         for (item_kind, mut data) in items {
             let kind = item_kind.or_else(|| default_kind.clone()).unwrap_or_else(|| "records".into());
             if kind.trim().is_empty() || kind.len() > 128 {
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid collection name"));
             }
-            let fingerprint = hex(&Sha256::digest(serde_json::to_vec(&(&kind, &data)).map_err(io::Error::other)?));
-            let now = Utc::now();
             if let Some(ttl) = data.get("ttl").and_then(Value::as_i64).filter(|ttl| *ttl > 0) {
                 if !data.contains_key("expires_at") {
                     let expires = chrono::Duration::try_seconds(ttl).and_then(|ttl| now.checked_add_signed(ttl))
@@ -1024,25 +1127,25 @@ impl Store {
                     data.insert("expires_at".into(), Value::String(expires.to_rfc3339()));
                 }
             }
-            if serde_json::to_vec(&data).map_err(io::Error::other)?.len() > MAX_RECORD_BYTES {
-                return Err(io::Error::new(io::ErrorKind::InvalidInput, "artifact data exceeds 16 MiB"));
-            }
-            let timestamp = now.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
             let artifact = Artifact { id: new_id("art"), workspace_id: workspace.into(), kind, data,
-                revision: 1, created_at: timestamp.clone(), updated_at: timestamp };
-            events.push(Event::Artifact { artifact: artifact.clone(), idempotency: None, fingerprint });
+                revision: 1, created_at: timestamp.clone(), updated_at: timestamp.clone() };
+            events.push(Event::Artifact { artifact: artifact.clone(), idempotency: None, fingerprint: String::new() });
             results.push(artifact);
         }
         if !events.is_empty() {
             self.commit(Event::Batch { events })?;
-            // Projections are rebuildable caches. A lost cache write never loses a
-            // committed record; open() validates and repairs projections.
-            for artifact in &results {
-                if self.write_projection(artifact, false).is_err() {
-                    eprintln!("TOON projection pending; it will be repaired on restart");
+            if results.len() <= 64 {
+                let artifacts: Vec<Arc<Artifact>> = results.iter()
+                    .filter_map(|artifact| self.artifacts.get(&artifact.id).cloned()).collect();
+                let root = self.root.clone();
+                for artifact in &artifacts {
+                    let destination = root.join("artifacts").join(format!("{}.toon", artifact.id));
+                    if let Ok(val) = serde_json::to_value(artifact) {
+                        let output = crate::toon::encode(&val);
+                        let _ = fs::write(&destination, output.as_bytes());
+                    }
                 }
             }
-            let _ = sync_dir(&self.root.join("artifacts"));
         }
         Ok(results)
     }
@@ -1097,9 +1200,19 @@ impl Store {
 
     pub fn list(&self, workspace: &str, kind: Option<&str>) -> Vec<Artifact> {
         let now = Utc::now().to_rfc3339();
-        let mut records: Vec<_> = self.artifacts.values()
-            .filter(|a| a.workspace_id == workspace && kind.is_none_or(|k| a.kind == k) && !Self::is_expired(a, &now))
-            .collect();
+        let mut records: Vec<_> = if let Some(k) = kind {
+            if let Some(arts) = self.collection_index.get(workspace).and_then(|kinds| kinds.get(k)) {
+                arts.iter()
+                    .filter(|a| !Self::is_expired(a, &now))
+                    .collect()
+            } else {
+                Vec::new()
+            }
+        } else {
+            self.artifacts.values()
+                .filter(|a| a.workspace_id == workspace && !Self::is_expired(a, &now))
+                .collect()
+        };
         records.sort_unstable_by(|a, b| (&a.created_at, &a.id).cmp(&(&b.created_at, &b.id)));
         records.into_iter().map(|a| a.as_ref().clone()).collect()
     }
@@ -1110,52 +1223,71 @@ impl Store {
         records.into_iter().cloned().collect()
     }
 
-    fn visible_refs(&self, workspace: &str, kind: Option<&str>, user_id: Option<&str>) -> Vec<&Arc<Artifact>> {
+    pub fn visible_refs(&self, workspace: &str, kind: Option<&str>, user_id: Option<&str>) -> Vec<&Arc<Artifact>> {
         let now = Utc::now().to_rfc3339();
-        let owned_files: BTreeMap<&str, &str> = self.files.values()
-            .filter_map(|f| f.user_id.as_deref().map(|owner| (f.artifact_id.as_str(), owner))).collect();
-        self.artifacts.values().filter(|a| a.workspace_id == workspace
-            && kind.is_none_or(|k| a.kind == k) && !Self::is_expired(a, &now)
-            && self.is_record_visible(a, user_id, Some(&owned_files))).collect()
+        let owned_files: Option<BTreeMap<&str, &str>> = if user_id.is_some() || kind.is_none() || kind == Some("files") {
+            Some(self.files.values()
+                .filter_map(|f| f.user_id.as_deref().map(|owner| (f.artifact_id.as_str(), owner))).collect())
+        } else {
+            None
+        };
+        if let Some(k) = kind {
+            if let Some(arts) = self.collection_index.get(workspace).and_then(|kinds| kinds.get(k)) {
+                arts.iter()
+                    .filter(|a| !Self::is_expired(a, &now) && self.is_record_visible(a, user_id, owned_files.as_ref()))
+                    .collect()
+            } else {
+                Vec::new()
+            }
+        } else {
+            self.artifacts.values().filter(|a| a.workspace_id == workspace
+                && !Self::is_expired(a, &now)
+                && self.is_record_visible(a, user_id, owned_files.as_ref())).collect()
+        }
     }
 
     pub fn list_visible(&self, workspace: &str, kind: Option<&str>, user_id: Option<&str>) -> Vec<Artifact> {
         self.snapshot_visible(workspace, kind, user_id).into_iter().map(|a| a.as_ref().clone()).collect()
     }
 
-    /// Copy only the requested page; ordering and cursor visibility use references.
     pub fn page_visible(&self, workspace: &str, kind: Option<&str>, user_id: Option<&str>,
-        anchor: Option<(&str, &str)>, offset: usize, limit: usize) -> Option<(Vec<Artifact>, usize, bool)> {
+        anchor: Option<(&str, &str)>, offset: usize, limit: usize) -> Option<(Vec<Arc<Artifact>>, usize, bool)> {
         let mut records = self.visible_refs(workspace, kind, user_id);
         let total = records.len();
-        records.sort_unstable_by(|a, b| (&a.created_at, &a.id).cmp(&(&b.created_at, &b.id)));
+        if kind.is_none() || anchor.is_some() {
+            records.sort_unstable_by(|a, b| (&a.created_at, &a.id).cmp(&(&b.created_at, &b.id)));
+        }
         let start = if let Some((created_at, id)) = anchor {
             records.iter().position(|a| a.created_at == created_at && a.id == id)? + 1
         } else { offset.min(total) };
         let end = start.saturating_add(limit).min(total);
-        Some((records[start..end].iter().map(|a| a.as_ref().clone()).collect(), total, end < total))
+        Some((records[start..end].iter().copied().cloned().collect(), total, end < total))
     }
 
     pub fn search_vectors(&self, workspace: &str, collection: Option<&str>, query_vector: &[f32],
         top_k: usize, min_score: Option<f32>, user_id: Option<&str>) -> Vec<(Artifact, f32)> {
         let mut scored = Vec::new();
-        let mut vector = Vec::with_capacity(query_vector.len());
+        let query_norm = query_vector.iter().map(|value| value * value).sum::<f32>();
         for record in self.visible_refs(workspace, collection, user_id) {
-            let Some(embedding) = record.data.get("embedding").or_else(|| record.data.get("vector")).and_then(Value::as_array) else { continue; };
-            if embedding.len() != query_vector.len() { continue; }
-            vector.clear();
-            for value in embedding {
-                let Some(value) = value.as_f64() else { break; };
-                vector.push(value as f32);
-            }
-            if vector.len() == query_vector.len() {
-                let score = cosine_similarity(query_vector, &vector);
-                if score >= min_score.unwrap_or(0.0) { scored.push((record, score)); }
-            }
+            let Some(vector) = self.vector_index.get(&record.id) else { continue; };
+            if vector.values.len() != query_vector.len() { continue; }
+            let norm = query_norm * vector.norm;
+            let score = if norm <= 0.0 {
+                0.0
+            } else {
+                let dot = query_vector.iter().zip(&vector.values).map(|(a, b)| a * b).sum::<f32>();
+                dot / norm.sqrt()
+            };
+            if score >= min_score.unwrap_or(0.0) { scored.push((record, score)); }
         }
         // Preserve the previous stable tie order (creation time, then ID).
-        scored.sort_unstable_by(|(a, x), (b, y)| y.total_cmp(x).then_with(|| (&a.created_at, &a.id).cmp(&(&b.created_at, &b.id))));
-        scored.truncate(top_k);
+        let compare = |(a, x): &(&Arc<Artifact>, f32), (b, y): &(&Arc<Artifact>, f32)|
+            y.total_cmp(x).then_with(|| (&a.created_at, &a.id).cmp(&(&b.created_at, &b.id)));
+        if top_k < scored.len() {
+            if top_k > 0 { scored.select_nth_unstable_by(top_k, compare); }
+            scored.truncate(top_k);
+        }
+        scored.sort_unstable_by(compare);
         scored.into_iter().map(|(record, score)| (record.as_ref().clone(), score)).collect()
     }
 
@@ -1544,7 +1676,14 @@ impl Store {
             })
             .collect();
         for id in expired_ids {
-            self.artifacts.remove(&id);
+            self.vector_index.remove(&id);
+            if let Some(old) = self.artifacts.remove(&id) {
+                if let Some(kinds) = self.collection_index.get_mut(&old.workspace_id) {
+                    if let Some(list) = kinds.get_mut(&old.kind) {
+                        list.retain(|a| a.id != id);
+                    }
+                }
+            }
             purged_expired += 1;
             let _ = fs::remove_file(self.root.join("artifacts").join(format!("{id}.toon")));
         }
