@@ -58,7 +58,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         match arg.as_str() {
             "--help" | "-h" => {
                 println!(
-                    "NioDB — The Agentic DB that works.\nA lightweight database with natural-language queries, powered by Nio.\n\nUsage: nio-db [serve|init-auth|add-secret|backup] [OPTIONS]\n\n  --dir PATH             Server data directory (default: nio-db)\n  --listen IP:PORT       Listen address (default: 127.0.0.1:7432)\n  --pg-listen IP:PORT    PostgreSQL wire protocol listen address (default: 127.0.0.1:5433)\n  --pg-password PASS     PostgreSQL password (default: NIODB_PG_PASSWORD or auth token)\n  --no-pg                Disable PostgreSQL wire protocol connector\n  --auth-file PATH       Hashed bearer credentials (default: DIR/auth.json)\n  --nio-bin PATH         Nio CLI executable (default: nio on PATH)\n  --nio-timeout SECONDS  Timeout per Nio invocation (default: 60)\n  --node-bin PATH        Node executable for AlaSQL (default: node on PATH)\n  --alasql-helper PATH   AlaSQL helper script\n  --name NAME            Principal name for init-auth (default: nio)\n  --skill NAME           Nio skill grant for init-auth; repeatable\n  --plugin NAME          Nio plugin discovery grant; repeatable\n  --output PATH          New backup destination; stop the server before backup\n  --include-files        Back up journal and blobs into a new directory\n  --seed-demo            Add starter examples to an existing database once\n  --no-demo              Skip starter examples on first launch\n  --version              Print version\n\ninit-auth creates client and secret bearer tokens and prints both once.\nadd-secret adds or rotates the secret token; save its output privately.\nThe server invokes Nio for read-only natural-language assistance."
+                    "NioDB — The Agentic DB that works.\nA lightweight database with natural-language queries, powered by Nio.\n\nUsage: nio-db [serve|init-auth|add-secret|backup] [OPTIONS]\n\n  --dir PATH             Server data directory (default: nio-db)\n  --listen IP:PORT       Listen address (default: 127.0.0.1:7432)\n  --pg-listen IP:PORT    PostgreSQL wire protocol listen address (default: 127.0.0.1:5433)\n  --pg-password PASS     PostgreSQL password (default: secret token from data dir)\n  --no-pg                Disable PostgreSQL wire protocol connector\n  --auth-file PATH       Hashed bearer credentials (default: DIR/auth.json)\n  --nio-bin PATH         Nio CLI executable (default: nio on PATH)\n  --nio-timeout SECONDS  Timeout per Nio invocation (default: 60)\n  --node-bin PATH        Node executable for AlaSQL (default: node on PATH)\n  --alasql-helper PATH   AlaSQL helper script\n  --name NAME            Principal name for init-auth (default: nio)\n  --skill NAME           Nio skill grant for init-auth; repeatable\n  --plugin NAME          Nio plugin discovery grant; repeatable\n  --output PATH          New backup destination; stop the server before backup\n  --include-files        Back up journal and blobs into a new directory\n  --seed-demo            Add starter examples to an existing database once\n  --no-demo              Skip starter examples on first launch\n  --version              Print version\n\ninit-auth creates client and secret bearer tokens and prints both once.\nadd-secret adds or rotates the secret token; save its output privately.\nThe server invokes Nio for read-only natural-language assistance."
                 );
                 return Ok(());
             }
@@ -226,6 +226,15 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         node_binary: node,
         worker_runner,
     };
+    if pg_password.is_none() {
+        let secret_file = data.join("secret-token");
+        if let Ok(token) = std::fs::read_to_string(&secret_file) {
+            let trimmed = token.trim();
+            if !trimmed.is_empty() {
+                pg_password = Some(trimmed.to_string());
+            }
+        }
+    }
     let pg_url = if let Some(pg_addr) = pg_listen {
         let app_pg = app.clone();
         let pass = pg_password.clone();
