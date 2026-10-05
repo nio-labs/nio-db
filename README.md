@@ -13,10 +13,38 @@ NioDB is a standalone Rust server. Nio and web/mobile applications connect over 
 - Restricted read-only AlaSQL SELECT, bound parameters, joins and aggregates.
 - Nio-assisted queries, clarification, owned conversations and validated record references.
 - Permission-filtered Nio skill/plugin discovery; approved small skills can guide assistance.
-- Built-in Shadcn + Vue 3 Web Console Dashboard (accessible in your browser at `http://localhost:7432` or `/console`) to manage Data & Queries, Files & Buckets, Live Events & Webhooks, Auth Users, and Server Config.
+- Built-in Shadcn + Vue 3 Web Console Dashboard (accessible in your browser at [http://localhost:7432](http://localhost:7432) or [http://localhost:7432/console](http://localhost:7432/console)) to manage Data & Queries, Files & Buckets, Live Events & Webhooks, Auth Users, and Server Config.
 - [OpenAPI 3.1 contract](openapi.yaml), readiness endpoints, offline backup and npm binary launcher.
 
-This is an initial implementation. The npm packages are not published. AlaSQL is installed and reports ready; complete query behavior still needs verification.
+---
+
+**Contents**
+
+- [Current implementation](#current-implementation)
+- [☁️ 1-Click Cloud Deployment](#️-1-click-cloud-deployment)
+  - [1-Click Deploy to Railway](#1-click-deploy-to-railway)
+  - [1-Click Deploy to Koyeb](#1-click-deploy-to-koyeb)
+- [1-Command Self-Hosting with Docker](#1-command-self-hosting-with-docker)
+  - [Direct LLM Fallback (Zero-Daemon AI)](#direct-llm-fallback-zero-daemon-ai)
+- [CLI and first-run setup](#cli-and-first-run-setup)
+  - [Run from source now](#run-from-source-now)
+- [API examples](#api-examples)
+  - [Guides & Interactive Docs](#guides)
+  - [SQL surface](#sql-surface)
+  - [Row-Level Security (RLS)](#row-level-security-rls)
+  - [Model Context Protocol (MCP) for Coding Agents](#model-context-protocol-mcp-for-coding-agents)
+- [App authentication](#app-authentication)
+- [Files and buckets](#files-and-buckets)
+- [Live events, workers and webhooks](#live-events-workers-and-webhooks)
+- [Chat, intelligence and SQL](#chat-intelligence-and-sql)
+- [Backup and recovery](#backup-and-recovery)
+- [Web Console Dashboard](#web-console-dashboard)
+- [Client SDKs](#client-sdks)
+- [Initial limits](#initial-limits)
+- [Packaging and release](#packaging-and-release)
+- [License](#license)
+
+---
 
 ## ☁️ 1-Click Cloud Deployment
 
@@ -135,11 +163,11 @@ Use the returned `conversation_id` for follow-up questions. Conversations belong
 
 ### Guides
 
-Open **http://127.0.0.1:7432/docs/** for detailed setup, token and user flows, records and collections, SQL, Nio assistance, files, chat, live events, workers, webhooks, capabilities, backup and current limits. It includes copyable requests, response shapes and permission rules. The page is embedded in the Rust executable and needs no separate documentation process. Google Sans Code loads from Google Fonts when the browser has internet access, with a system font fallback. `/docs` redirects to `/docs/`; the guide links to the interactive API reference at `/doc`.
+Open [http://127.0.0.1:7432/docs/](http://127.0.0.1:7432/docs/) for detailed setup, token and user flows, records and collections, SQL, Nio assistance, files, chat, live events, workers, webhooks, capabilities, backup and current limits. It includes copyable requests, response shapes and permission rules. The page is embedded in the Rust executable and needs no separate documentation process. Google Sans Code loads from Google Fonts when the browser has internet access, with a system font fallback. `/docs` redirects to `/docs/`; the guide links to the interactive API reference at `/doc`.
 
 ### Interactive documentation
 
-Open **http://127.0.0.1:7432/doc** for a single Swagger UI page with endpoint details and **Try it out**. Click **Authorize** and paste your bearer token (without the `Bearer ` prefix) to call protected endpoints. Authorization is kept in memory and cleared on reload. Requests go to the same NioDB server.
+Open [http://127.0.0.1:7432/doc](http://127.0.0.1:7432/doc) for a single Swagger UI page with endpoint details and **Try it out**. Click **Authorize** and paste your bearer token (without the `Bearer ` prefix) to call protected endpoints. Authorization is kept in memory and cleared on reload. Requests go to the same NioDB server.
 
 The page is embedded in the Rust executable; its version-pinned Swagger UI JavaScript and CSS load from a CDN, so your browser needs internet access. There is no additional server dependency or frontend build. Swagger's remote validator is disabled. Configuration follows the [official Swagger UI documentation](https://swagger.io/docs/open-source-tools/swagger-ui/usage/configuration/).
 
@@ -349,7 +377,7 @@ The destination must be a new directory. It contains the consistent journal and 
 
 ## Web Console Dashboard
 
-NioDB includes a built-in administration web console served directly by the server. Open your browser and navigate to `http://localhost:7432` (or `/console`) to access the dashboard.
+NioDB includes a built-in administration web console served directly by the server. Open your browser and navigate to [http://localhost:7432](http://localhost:7432) (or [http://localhost:7432/console](http://localhost:7432/console)) to access the dashboard.
 It is styled with Vue 3, Shadcn design tokens (unified teal theme, light mode by default with dark toggle), and Google Sans Code font.
 
 - **Data & Query Explorer**: Interactive data grid, collection filters, search, pagination, detailed JSON drawer, new record creation, JSON export, AlaSQL Query Studio (`>_`), and Natural Language Intelligence planning.
@@ -358,6 +386,13 @@ It is styled with Vue 3, Shadcn design tokens (unified teal theme, light mode by
 - **Live Events & Webhooks**: Real-time SSE event stream viewer (`/api/v1/events/stream`), event publishing, webhook subscriptions, and TypeScript worker registration.
 - **Auth & User Directory**: List database users, create accounts, test user logins, and manage bearer tokens.
 - **Config & System Status**: Real-time health monitoring (`/health`), AlaSQL query engine status, Nio CLI intelligence status, principal skills, and discovered plugins.
+
+## Client SDKs
+
+NioDB provides zero-dependency, ultra-lightweight client SDKs:
+
+- **TypeScript / JavaScript**: [`@nio-labs/nio-db.js`](packages/nio-db.js) (< 8 KB, browser, Node.js, Bun, Deno, React Native).
+- **Python**: [`nio-db-py`](packages/nio-db-py) (zero dependencies, typed, Python 3.8+).
 
 ## Initial limits
 
