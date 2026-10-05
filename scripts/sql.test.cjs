@@ -41,7 +41,9 @@ test('compiler rejects host access, writes, multiple statements and prototype ac
 });
 
 let installed = true;
-try { require.resolve('alasql'); } catch { installed = false; }
+try { require('../runtime/alasql.min.js'); } catch {
+  try { require.resolve('alasql'); } catch { installed = false; }
+}
 test('actual AlaSQL helper filters authorized rows and reports matching count', { skip: installed ? false : 'AlaSQL dependency is unavailable; npm registry network access is required' }, () => {
   const result = spawnSync(process.execPath, [join(__dirname, '..', 'runtime', 'alasql.cjs')], {
     encoding: 'utf8', input: JSON.stringify({ protocol: 1, tables: { artifacts: [{id:'a',status:'pending'}, {id:'b',status:'done'}] }, sql:'SELECT id FROM artifacts WHERE status = ? LIMIT 1', parameters:['pending'], include_count:true })

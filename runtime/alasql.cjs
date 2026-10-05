@@ -4,8 +4,12 @@ const { compileSql } = require('./sql.cjs');
 function output(value) { process.stdout.write(JSON.stringify(value) + '\n'); }
 async function main() {
   let alasql;
-  try { alasql = require('alasql'); }
-  catch { output({ error: 'alasql_unavailable' }); process.exitCode = 1; return; }
+  try {
+    alasql = require('./alasql.min.js');
+  } catch {
+    try { alasql = require('alasql'); }
+    catch { output({ error: 'alasql_unavailable' }); process.exitCode = 1; return; }
+  }
   if (process.argv.includes('--check')) { output({ status: 'ready' }); return; }
   const chunks = []; let length = 0;
   for await (const chunk of process.stdin) {
