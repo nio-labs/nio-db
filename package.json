@@ -1,6 +1,6 @@
 {
   "name": "@nio-labs/nio-db",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "NioDB \u2014 The Agentic DB that works. A lightweight database with natural-language queries, powered by Nio.",
   "license": "MIT",
   "bin": {
