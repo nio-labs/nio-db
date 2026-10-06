@@ -2569,12 +2569,16 @@ struct CreateSessionBody {
     title: String,
     #[serde(default)]
     goal: Option<String>,
-    #[serde(default = "default_model_tier")]
-    model_tier: String,
     #[serde(default)]
     agent: Option<String>,
     #[serde(default)]
     model: Option<String>,
+    #[serde(default)]
+    swarm_type: Option<String>,
+    #[serde(default)]
+    agents: Option<Value>,
+    #[serde(default = "default_model_tier")]
+    model_tier: String,
     #[serde(default)]
     persona: Option<String>,
     #[serde(default)]
@@ -2612,11 +2616,22 @@ async fn create_session_endpoint(
     let mut data = Map::new();
     data.insert("title".into(), Value::String(body.title));
     data.insert("goal".into(), Value::String(body.goal.unwrap_or_default()));
-    data.insert("model_tier".into(), Value::String(body.model_tier));
-    data.insert("active_agent".into(), Value::String(body.agent.unwrap_or_else(|| "agy".into())));
+    
+    let active_agent = body.agent.clone().unwrap_or_else(|| "agy".into());
+    if let Some(ag) = body.agent {
+        data.insert("agent".into(), Value::String(ag));
+    }
     if let Some(m) = body.model {
         data.insert("model".into(), Value::String(m));
     }
+    if let Some(st) = body.swarm_type {
+        data.insert("swarm_type".into(), Value::String(st));
+    }
+    if let Some(ac) = body.agents {
+        data.insert("agents".into(), ac);
+    }
+    data.insert("model_tier".into(), Value::String(body.model_tier));
+    data.insert("active_agent".into(), Value::String(active_agent));
     data.insert("persona".into(), Value::String(body.persona.unwrap_or_else(|| "senior-engineer".into())));
     data.insert("status".into(), Value::String("active".into()));
     data.insert("turns".into(), Value::Array(Vec::new()));
@@ -2717,7 +2732,10 @@ fn compile_manifest_value(
     let session_id = &session_art.id;
     let goal = session_art.data.get("goal").and_then(Value::as_str).unwrap_or("No goal specified");
     let title = session_art.data.get("title").and_then(Value::as_str).unwrap_or("Untitled Session");
-    let active_agent = session_art.data.get("active_agent").and_then(Value::as_str).unwrap_or("unknown");
+    let active_agent = session_art.data.get("active_agent")
+        .or_else(|| session_art.data.get("agent"))
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
     let model = session_art.data.get("model").and_then(Value::as_str).unwrap_or("default");
     let persona = session_art.data.get("persona").and_then(Value::as_str).unwrap_or("senior-engineer");
     let model_tier = session_art.data.get("model_tier").and_then(Value::as_str).unwrap_or("strong");
@@ -2725,20 +2743,35 @@ fn compile_manifest_value(
 
     let mut files_set = BTreeSet::new();
     let mut turn_summaries = Vec::new();
+    let mut recent_turns = Vec::new();
     for t in turns {
+        let mut turn_files = Vec::new();
         if let Some(files) = t.data.get("files_touched").and_then(Value::as_array) {
             for f in files {
-                if let Some(s) = f.as_str() { files_set.insert(s.to_string()); }
+                if let Some(s) = f.as_str() { 
+                    files_set.insert(s.to_string());
+                    turn_files.push(s.to_string());
+                }
             }
         }
         let agent = t.data.get("agent").and_then(Value::as_str).unwrap_or("agent");
+        let mo = t.data.get("model").and_then(Value::as_str).unwrap_or("");
         let summary = t.data.get("summary").and_then(Value::as_str).unwrap_or("");
+        let created = t.data.get("created_at").and_then(Value::as_str).unwrap_or("");
         if !summary.is_empty() {
             turn_summaries.push(format!("- [{agent}] {summary}"));
         }
+        recent_turns.push(json!({
+            "agent": agent,
+            "model": mo,
+            "summary": summary,
+            "files_touched": turn_files,
+            "created_at": created
+        }));
     }
 
     let mut dead_end_summaries = Vec::new();
+    let mut known_dead_ends = Vec::new();
     for d in dead_ends {
         let hyp = d.data.get("hypothesis").and_then(Value::as_str).unwrap_or("");
         let reason = d.data.get("reason").and_then(Value::as_str).unwrap_or("");
@@ -2746,6 +2779,15 @@ fn compile_manifest_value(
         if !hyp.is_empty() {
             dead_end_summaries.push(format!("- [{agent}] Hypothesis: \"{hyp}\" -> Failed: {reason}"));
         }
+        let issue = d.data.get("issue").or_else(|| d.data.get("hypothesis")).and_then(Value::as_str).unwrap_or("");
+        let attempt = d.data.get("attempt").or_else(|| d.data.get("hypothesis")).and_then(Value::as_str).unwrap_or("");
+        let why = d.data.get("why").or_else(|| d.data.get("reason")).and_then(Value::as_str).unwrap_or("");
+        known_dead_ends.push(json!({
+            "issue": issue,
+            "attempt": attempt,
+            "why": why,
+            "agent": agent
+        }));
     }
 
     let dead_ends_section = if dead_end_summaries.is_empty() {
@@ -2778,6 +2820,7 @@ fn compile_manifest_value(
         "title": title,
         "goal": goal,
         "active_agent": active_agent,
+        "current_agent": active_agent,
         "model": model,
         "persona": persona,
         "model_tier": model_tier,
@@ -2785,6 +2828,8 @@ fn compile_manifest_value(
         "turn_count": turns.len(),
         "dead_ends_count": dead_ends.len(),
         "files_touched": files_list,
+        "recent_turns": recent_turns,
+        "known_dead_ends": known_dead_ends,
         "manifest_text": manifest_text
     })
 }
@@ -2849,6 +2894,7 @@ async fn switch_session_agent_endpoint(
     // 3. Update session active_agent, optional model, and optional persona
     let mut updates = Map::new();
     updates.insert("active_agent".into(), Value::String(to_agent.clone()));
+    updates.insert("agent".into(), Value::String(to_agent.clone()));
     if let Some(m) = &body.model {
         updates.insert("model".into(), Value::String(m.clone()));
     }
@@ -2890,9 +2936,11 @@ async fn switch_session_agent_endpoint(
         "session_id": session_id,
         "previous_agent": prev_agent,
         "active_agent": to_agent,
+        "agent": to_agent,
         "model": body.model,
         "reason": reason,
-        "manifest": manifest_val
+        "manifest": manifest_val,
+        "session": record_value(public_value(&updated_session))
     })))
 }
 
@@ -2984,8 +3032,16 @@ async fn get_session_manifest(
 
 #[derive(Deserialize)]
 struct DeadEndBody {
-    hypothesis: String,
-    reason: String,
+    #[serde(default)]
+    hypothesis: Option<String>,
+    #[serde(default)]
+    reason: Option<String>,
+    #[serde(default)]
+    issue: Option<String>,
+    #[serde(default)]
+    attempt: Option<String>,
+    #[serde(default)]
+    why: Option<String>,
     #[serde(default)]
     agent: Option<String>,
 }
@@ -3001,10 +3057,20 @@ async fn add_dead_end(
     authorize(&principal, &ws, &id)?;
     let body = body.map_err(|rejection| body_error(&id, rejection))?.0;
 
+    let issue = body.issue.clone().or_else(|| body.hypothesis.clone()).unwrap_or_else(|| "Unknown issue".into());
+    let attempt = body.attempt.clone().or_else(|| body.hypothesis.clone()).unwrap_or_else(|| "Attempted solution".into());
+    let why = body.why.clone().or_else(|| body.reason.clone()).unwrap_or_else(|| "Failed".into());
+    
+    let hypothesis = attempt.clone();
+    let reason = why.clone();
+
     let mut data = Map::new();
     data.insert("session_id".into(), Value::String(session_id));
-    data.insert("hypothesis".into(), Value::String(body.hypothesis));
-    data.insert("reason".into(), Value::String(body.reason));
+    data.insert("issue".into(), Value::String(issue));
+    data.insert("attempt".into(), Value::String(attempt));
+    data.insert("why".into(), Value::String(why));
+    data.insert("hypothesis".into(), Value::String(hypothesis));
+    data.insert("reason".into(), Value::String(reason));
     data.insert("agent".into(), Value::String(body.agent.unwrap_or_else(|| "unknown".into())));
     data.insert("created_at".into(), Value::String(chrono::Utc::now().to_rfc3339()));
 
@@ -4405,6 +4471,26 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(manifest_res["turn_count"], 1);
         assert!(manifest_res["manifest_text"].as_str().unwrap().contains("Implemented JWT refresh endpoint"));
+        assert_eq!(manifest_res["files_touched"].as_array().unwrap().len(), 1);
+        assert_eq!(manifest_res["recent_turns"].as_array().unwrap().len(), 1);
+
+        // Switch Agent in Session
+        let switch_payload = json!({
+            "to_agent": "codex",
+            "model": "gpt-4o",
+            "reason": "Optimize query performance"
+        });
+        let switch_path = format!("/api/v1/sessions/{session_id}/switch");
+        let (status, switch_res) = request(&router, "POST", &switch_path, Some("alice"), switch_payload, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(switch_res["success"], true);
+        assert_eq!(switch_res["agent"], "codex");
+
+        // Verify Manifest Reflects Switch
+        let (status, manifest_res2) = request(&router, "GET", &manifest_path, Some("alice"), Value::Null, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(manifest_res2["current_agent"], "codex");
+        assert_eq!(manifest_res2["model"], "gpt-4o");
 
         // Add Dead-End Memory
         let dead_end_payload = json!({
