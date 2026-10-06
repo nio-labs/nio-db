@@ -25,6 +25,9 @@ export interface VectorSearchOptions {
 export interface CreateSessionOptions {
   title: string;
   goal?: string;
+  agent?: string;
+  model?: string;
+  persona?: string;
   modelTier?: "fast" | "strong" | "free" | "local" | string;
   model_tier?: string;
   metadata?: Record<string, any>;
@@ -93,17 +96,149 @@ export interface CollectionClient {
   watch(callback: (event: { event: string; collection?: string; record?: any; id?: string }) => void): () => void;
 }
 
+export interface SwitchSessionOptions {
+  toAgent?: string;
+  agent?: string;
+  to_agent?: string;
+  reason?: string;
+  persona?: string;
+  summaryOfWork?: string;
+  summary_of_work?: string;
+}
+
+export interface UpdateSessionOptions {
+  title?: string;
+  goal?: string;
+  status?: string;
+  activeAgent?: string;
+  active_agent?: string;
+  persona?: string;
+  modelTier?: string;
+  model_tier?: string;
+  metadata?: Record<string, any>;
+}
+
+export interface AgentAdapter {
+  name: string;
+  formatPrompt(manifest: any, instructions: string): string;
+}
+
+export interface BridgeClient {
+  create(options?: CreateSessionOptions): Promise<any>;
+  get(sessionId: string): Promise<any>;
+  update(sessionId: string, updates: UpdateSessionOptions): Promise<any>;
+  switch(sessionId: string, options: string | SwitchSessionOptions): Promise<{
+    success: boolean;
+    session_id: string;
+    previous_agent: string;
+    active_agent: string;
+    reason: string;
+    manifest: any;
+  }>;
+  appendTurn(sessionId: string, options: AppendTurnOptions): Promise<{ success: boolean; session_id: string; turn: any }>;
+  getManifest(sessionId: string): Promise<{ session_id: string; title: string; goal: string; turn_count: number; manifest_text: string }>;
+  logDeadEnd(sessionId: string, options: DeadEndOptions): Promise<any>;
+  getDeadEnds(sessionId: string): Promise<{ session_id: string; dead_ends: any[]; count: number }>;
+  adapters: {
+    agy: AgentAdapter;
+    claude: AgentAdapter;
+    codex: AgentAdapter;
+    cursor: AgentAdapter;
+  };
+}
+
+export interface AssembleTask {
+  title: string;
+  prompt: string;
+  priority?: "low" | "normal" | "high" | "urgent";
+  role?: string;
+  assignedAgent?: string;
+  assigned_agent?: string;
+  dependencies?: string[];
+  metadata?: Record<string, any>;
+}
+
+export interface AssembleCreateOptions {
+  title?: string;
+  goal?: string;
+  model?: string;
+  plannerModel?: string;
+  coderModel?: string;
+  testerModel?: string;
+  agents?: "auto" | {
+    planner?: string;
+    coder?: string;
+    tester?: string;
+    [role: string]: string | undefined;
+  };
+  modelTier?: string;
+  model_tier?: string;
+  metadata?: Record<string, any>;
+}
+
+export interface AssembleStatus {
+  sessionId: string;
+  title?: string;
+  goal?: string;
+  activeAgent?: string;
+  totalTasks: number;
+  pending: number;
+  inProgress: number;
+  completed: number;
+  failed: number;
+  allCompleted: boolean;
+  deadEndsCount: number;
+  tasks: any[];
+}
+
+export interface AssembleClient {
+  nioDecideSwarm(goal?: string, options?: AssembleCreateOptions): {
+    lead: string;
+    planner: { agent: string; model: string; persona: string };
+    coder: { agent: string; model: string; persona: string };
+    tester: { agent: string; model: string; persona: string };
+    rationale: string;
+  };
+  create(options?: AssembleCreateOptions): Promise<{
+    session: any;
+    sessionId: string;
+    lead?: string;
+    agents: Record<string, string>;
+    decision?: any;
+  }>;
+  plan(sessionId: string, prompt: string, tasks?: AssembleTask[]): Promise<{
+    sessionId: string;
+    tasks: any[];
+    count: number;
+  }>;
+  claimTask(taskId: string, agentName: string): Promise<any>;
+  completeTask(taskId: string, options?: any): Promise<any>;
+  failTask(taskId: string, error: any): Promise<any>;
+  status(sessionId: string): Promise<AssembleStatus>;
+}
+
 export interface SessionClient {
   create(options: CreateSessionOptions): Promise<any>;
   get(): Promise<any>;
+  update(updates: UpdateSessionOptions): Promise<any>;
+  switch(options: string | SwitchSessionOptions): Promise<any>;
   appendTurn(options: AppendTurnOptions): Promise<{ success: boolean; session_id: string; turn: any }>;
   getManifest(): Promise<{ session_id: string; title: string; goal: string; turn_count: number; manifest_text: string }>;
   logDeadEnd(options: DeadEndOptions): Promise<any>;
   getDeadEnds(): Promise<{ session_id: string; dead_ends: any[]; count: number }>;
 }
 
+export interface TasksListOptions {
+  sessionId?: string;
+  session_id?: string;
+  status?: string;
+  assignedAgent?: string;
+  assigned_agent?: string;
+  role?: string;
+}
+
 export interface TasksClient {
-  list(): Promise<{ items: any[]; count: number }>;
+  list(options?: TasksListOptions): Promise<{ items: any[]; count: number }>;
   create(options: CreateTaskOptions): Promise<any>;
   get(id: string): Promise<any>;
   update(id: string, updates: UpdateTaskOptions): Promise<any>;
@@ -144,10 +279,13 @@ export class NioDB {
   mcp(method: string, params?: Record<string, any>): Promise<any>;
   readonly sessions: SessionsClient;
   session(sessionId: string): SessionClient;
+  readonly bridge: BridgeClient;
+  readonly assemble: AssembleClient;
   readonly tasks: TasksClient;
   readonly events: EventsClient;
   readonly ledger: LedgerClient;
 }
 
 export function createNioDB(options?: NioDBOptions): NioDB;
+
 

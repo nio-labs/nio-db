@@ -184,7 +184,8 @@ pub fn router(app: App) -> Router {
         .route("/api/v1/mcp", post(mcp_handler))
         // Phase 3: NioBridge Sessions & Memory
         .route("/api/v1/sessions", get(list_sessions).post(create_session_endpoint))
-        .route("/api/v1/sessions/:id", get(get_session_endpoint))
+        .route("/api/v1/sessions/:id", get(get_session_endpoint).patch(update_session_endpoint))
+        .route("/api/v1/sessions/:id/switch", post(switch_session_agent_endpoint))
         .route("/api/v1/sessions/:id/turns", post(append_session_turn))
         .route("/api/v1/sessions/:id/manifest", get(get_session_manifest))
         .route("/api/v1/sessions/:id/dead-ends", get(get_dead_ends).post(add_dead_end))
@@ -2571,6 +2572,12 @@ struct CreateSessionBody {
     #[serde(default = "default_model_tier")]
     model_tier: String,
     #[serde(default)]
+    agent: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    persona: Option<String>,
+    #[serde(default)]
     metadata: Map<String, Value>,
 }
 fn default_model_tier() -> String { "strong".into() }
@@ -2606,6 +2613,11 @@ async fn create_session_endpoint(
     data.insert("title".into(), Value::String(body.title));
     data.insert("goal".into(), Value::String(body.goal.unwrap_or_default()));
     data.insert("model_tier".into(), Value::String(body.model_tier));
+    data.insert("active_agent".into(), Value::String(body.agent.unwrap_or_else(|| "agy".into())));
+    if let Some(m) = body.model {
+        data.insert("model".into(), Value::String(m));
+    }
+    data.insert("persona".into(), Value::String(body.persona.unwrap_or_else(|| "senior-engineer".into())));
     data.insert("status".into(), Value::String("active".into()));
     data.insert("turns".into(), Value::Array(Vec::new()));
     data.insert("dead_ends".into(), Value::Array(Vec::new()));
@@ -2640,6 +2652,248 @@ async fn get_session_endpoint(
     }).await?.ok_or_else(|| error(&id, StatusCode::NOT_FOUND, "not_found", "Session not found"))?;
 
     Ok(Json(record_value(public_value(&artifact))))
+}
+
+#[derive(Deserialize)]
+struct UpdateSessionBody {
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    goal: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    active_agent: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    persona: Option<String>,
+    #[serde(default)]
+    model_tier: Option<String>,
+    #[serde(default)]
+    metadata: Option<Map<String, Value>>,
+}
+
+async fn update_session_endpoint(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    Extension(id): Extension<RequestId>,
+    session: Option<Extension<accounts::SessionIdentity>>,
+    Path(session_id): Path<String>,
+    body: Result<Json<UpdateSessionBody>, JsonRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let ws = server_workspace(&app);
+    authorize(&principal, &ws, &id)?;
+    let body = body.map_err(|rejection| body_error(&id, rejection))?.0;
+    let user_id = session.as_ref().map(|s| s.user.id.clone());
+    let ws_clone = ws.clone();
+    let sid = session_id.clone();
+
+    let mut updates = Map::new();
+    if let Some(t) = body.title { updates.insert("title".into(), Value::String(t)); }
+    if let Some(g) = body.goal { updates.insert("goal".into(), Value::String(g)); }
+    if let Some(s) = body.status { updates.insert("status".into(), Value::String(s)); }
+    if let Some(a) = body.active_agent { updates.insert("active_agent".into(), Value::String(a)); }
+    if let Some(m) = body.model { updates.insert("model".into(), Value::String(m)); }
+    if let Some(p) = body.persona { updates.insert("persona".into(), Value::String(p)); }
+    if let Some(m) = body.model_tier { updates.insert("model_tier".into(), Value::String(m)); }
+    if let Some(meta) = body.metadata {
+        for (k, v) in meta { updates.insert(k, v); }
+    }
+
+    let uid = user_id.clone();
+    let updated = storage(&app, &id, move |store| {
+        store.update(&ws_clone, &sid, updates, true, uid.as_deref())
+    }).await?.ok_or_else(|| error(&id, StatusCode::NOT_FOUND, "not_found", "Session not found"))?;
+
+    Ok(Json(record_value(public_value(&updated))))
+}
+
+fn compile_manifest_value(
+    session_art: &Artifact,
+    turns: &[Artifact],
+    dead_ends: &[Artifact],
+) -> Value {
+    let session_id = &session_art.id;
+    let goal = session_art.data.get("goal").and_then(Value::as_str).unwrap_or("No goal specified");
+    let title = session_art.data.get("title").and_then(Value::as_str).unwrap_or("Untitled Session");
+    let active_agent = session_art.data.get("active_agent").and_then(Value::as_str).unwrap_or("unknown");
+    let model = session_art.data.get("model").and_then(Value::as_str).unwrap_or("default");
+    let persona = session_art.data.get("persona").and_then(Value::as_str).unwrap_or("senior-engineer");
+    let model_tier = session_art.data.get("model_tier").and_then(Value::as_str).unwrap_or("strong");
+    let status = session_art.data.get("status").and_then(Value::as_str).unwrap_or("active");
+
+    let mut files_set = BTreeSet::new();
+    let mut turn_summaries = Vec::new();
+    for t in turns {
+        if let Some(files) = t.data.get("files_touched").and_then(Value::as_array) {
+            for f in files {
+                if let Some(s) = f.as_str() { files_set.insert(s.to_string()); }
+            }
+        }
+        let agent = t.data.get("agent").and_then(Value::as_str).unwrap_or("agent");
+        let summary = t.data.get("summary").and_then(Value::as_str).unwrap_or("");
+        if !summary.is_empty() {
+            turn_summaries.push(format!("- [{agent}] {summary}"));
+        }
+    }
+
+    let mut dead_end_summaries = Vec::new();
+    for d in dead_ends {
+        let hyp = d.data.get("hypothesis").and_then(Value::as_str).unwrap_or("");
+        let reason = d.data.get("reason").and_then(Value::as_str).unwrap_or("");
+        let agent = d.data.get("agent").and_then(Value::as_str).unwrap_or("agent");
+        if !hyp.is_empty() {
+            dead_end_summaries.push(format!("- [{agent}] Hypothesis: \"{hyp}\" -> Failed: {reason}"));
+        }
+    }
+
+    let dead_ends_section = if dead_end_summaries.is_empty() {
+        "None recorded".to_string()
+    } else {
+        dead_end_summaries.join("\n")
+    };
+
+    let files_list: Vec<String> = files_set.into_iter().collect();
+    let files_str = if files_list.is_empty() { "None".to_string() } else { files_list.join(", ") };
+    let history_str = if turn_summaries.is_empty() { "No turns recorded yet".to_string() } else { turn_summaries.join("\n") };
+
+    let manifest_text = format!(
+        "# Session Manifest: {}\nGoal: {}\nActive Agent: {}\nModel: {}\nPersona: {}\nModel Tier: {}\nStatus: {}\nTotal Turns: {}\nFiles Touched: {}\n\n## Proven Invalid Approaches (Dead-Ends - DO NOT REPEAT):\n{}\n\n## Recent History:\n{}",
+        title,
+        goal,
+        active_agent,
+        model,
+        persona,
+        model_tier,
+        status,
+        turns.len(),
+        files_str,
+        dead_ends_section,
+        history_str
+    );
+
+    json!({
+        "session_id": session_id,
+        "title": title,
+        "goal": goal,
+        "active_agent": active_agent,
+        "model": model,
+        "persona": persona,
+        "model_tier": model_tier,
+        "status": status,
+        "turn_count": turns.len(),
+        "dead_ends_count": dead_ends.len(),
+        "files_touched": files_list,
+        "manifest_text": manifest_text
+    })
+}
+
+#[derive(Deserialize)]
+struct SwitchSessionBody {
+    to_agent: String,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    reason: Option<String>,
+    #[serde(default)]
+    persona: Option<String>,
+    #[serde(default)]
+    summary_of_work: Option<String>,
+}
+
+async fn switch_session_agent_endpoint(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    Extension(id): Extension<RequestId>,
+    session: Option<Extension<accounts::SessionIdentity>>,
+    Path(session_id): Path<String>,
+    body: Result<Json<SwitchSessionBody>, JsonRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let ws = server_workspace(&app);
+    authorize(&principal, &ws, &id)?;
+    let body = body.map_err(|rejection| body_error(&id, rejection))?.0;
+    let user_id = session.as_ref().map(|s| s.user.id.clone());
+    let ws_clone = ws.clone();
+    let sid = session_id.clone();
+    let uid = user_id.clone();
+
+    // 1. Fetch current session
+    let session_art = storage(&app, &id, move |store| {
+        Ok(store.get_visible(&ws_clone, &sid, uid.as_deref()))
+    }).await?.ok_or_else(|| error(&id, StatusCode::NOT_FOUND, "not_found", "Session not found"))?;
+
+    let prev_agent = session_art.data.get("active_agent").and_then(Value::as_str).unwrap_or("unknown").to_string();
+    let to_agent = body.to_agent.clone();
+    let reason = body.reason.clone().unwrap_or_else(|| format!("Handing off context from {prev_agent} to {to_agent}"));
+
+    // 2. Append handoff turn to session_turns
+    let mut turn_data = Map::new();
+    turn_data.insert("session_id".into(), Value::String(session_id.clone()));
+    turn_data.insert("agent".into(), Value::String("nio_bridge".into()));
+    turn_data.insert("model".into(), Value::String(body.model.clone().unwrap_or_else(|| "relay".into())));
+    turn_data.insert("summary".into(), Value::String(format!("Switch agent from {prev_agent} to {to_agent}: {reason}")));
+    if let Some(sum) = &body.summary_of_work {
+        turn_data.insert("handoff_summary".into(), Value::String(sum.clone()));
+    }
+    turn_data.insert("files_touched".into(), json!([]));
+    turn_data.insert("tokens".into(), json!(null));
+    turn_data.insert("cost_usd".into(), json!(0.0));
+    turn_data.insert("created_at".into(), Value::String(chrono::Utc::now().to_rfc3339()));
+
+    let ws_clone2 = ws.clone();
+    storage(&app, &id, move |store| {
+        store.create(&ws_clone2, "session_turns".into(), turn_data, None)
+    }).await?;
+
+    // 3. Update session active_agent, optional model, and optional persona
+    let mut updates = Map::new();
+    updates.insert("active_agent".into(), Value::String(to_agent.clone()));
+    if let Some(m) = &body.model {
+        updates.insert("model".into(), Value::String(m.clone()));
+    }
+    if let Some(p) = &body.persona {
+        updates.insert("persona".into(), Value::String(p.clone()));
+    }
+
+    let ws_clone3 = ws.clone();
+    let sid3 = session_id.clone();
+    let uid2 = user_id.clone();
+    let updated_session = storage(&app, &id, move |store| {
+        store.update(&ws_clone3, &sid3, updates, true, uid2.as_deref())
+    }).await?.ok_or_else(|| error(&id, StatusCode::NOT_FOUND, "not_found", "Failed to update session"))?;
+
+    // 4. Fetch turns & dead ends to compile lean manifest
+    let ws_clone4 = ws.clone();
+    let sid4 = session_id.clone();
+    let (turns, dead_ends) = storage(&app, &id, move |store| {
+        let all_turns = store.list_visible(&ws_clone4, Some("session_turns"), None);
+        let turns: Vec<_> = all_turns.into_iter().filter(|t| t.data.get("session_id").and_then(Value::as_str) == Some(&sid4)).collect();
+        let all_de = store.list_visible(&ws_clone4, Some("dead_ends"), None);
+        let dead_ends: Vec<_> = all_de.into_iter().filter(|d| d.data.get("session_id").and_then(Value::as_str) == Some(&sid4)).collect();
+        Ok((turns, dead_ends))
+    }).await?;
+
+    let manifest_val = compile_manifest_value(&updated_session, &turns, &dead_ends);
+
+    let _ = app.events.send(json!({
+        "event": "session.switched",
+        "session_id": session_id,
+        "previous_agent": prev_agent,
+        "active_agent": to_agent,
+        "model": body.model,
+        "reason": reason
+    }));
+
+    Ok(Json(json!({
+        "success": true,
+        "session_id": session_id,
+        "previous_agent": prev_agent,
+        "active_agent": to_agent,
+        "model": body.model,
+        "reason": reason,
+        "manifest": manifest_val
+    })))
 }
 
 #[derive(Deserialize)]
@@ -2716,45 +2970,16 @@ async fn get_session_manifest(
 
     let ws_clone2 = ws.clone();
     let sid2 = session_id.clone();
-    let turns = storage(&app, &id, move |store| {
+    let (turns, dead_ends) = storage(&app, &id, move |store| {
         let all_turns = store.list_visible(&ws_clone2, Some("session_turns"), None);
-        Ok(all_turns.into_iter().filter(|t| t.data.get("session_id").and_then(Value::as_str) == Some(&sid2)).collect::<Vec<_>>())
+        let turns: Vec<_> = all_turns.into_iter().filter(|t| t.data.get("session_id").and_then(Value::as_str) == Some(&sid2)).collect();
+        let all_de = store.list_visible(&ws_clone2, Some("dead_ends"), None);
+        let dead_ends: Vec<_> = all_de.into_iter().filter(|d| d.data.get("session_id").and_then(Value::as_str) == Some(&sid2)).collect();
+        Ok((turns, dead_ends))
     }).await?;
 
-    let goal = session_art.data.get("goal").and_then(Value::as_str).unwrap_or("No goal specified");
-    let title = session_art.data.get("title").and_then(Value::as_str).unwrap_or("Untitled Session");
-
-    let mut files_set = BTreeSet::new();
-    let mut turn_summaries = Vec::new();
-    for t in &turns {
-        if let Some(files) = t.data.get("files_touched").and_then(Value::as_array) {
-            for f in files {
-                if let Some(s) = f.as_str() { files_set.insert(s.to_string()); }
-            }
-        }
-        let agent = t.data.get("agent").and_then(Value::as_str).unwrap_or("agent");
-        let summary = t.data.get("summary").and_then(Value::as_str).unwrap_or("");
-        if !summary.is_empty() {
-            turn_summaries.push(format!("- [{agent}] {summary}"));
-        }
-    }
-
-    let manifest_text = format!(
-        "# Session Manifest: {}\nGoal: {}\nTotal Turns: {}\nFiles Touched: {}\n\nRecent History:\n{}",
-        title,
-        goal,
-        turns.len(),
-        files_set.into_iter().collect::<Vec<_>>().join(", "),
-        if turn_summaries.is_empty() { "No turns recorded yet".into() } else { turn_summaries.join("\n") }
-    );
-
-    Ok(Json(json!({
-        "session_id": session_id,
-        "title": title,
-        "goal": goal,
-        "turn_count": turns.len(),
-        "manifest_text": manifest_text
-    })))
+    let val = compile_manifest_value(&session_art, &turns, &dead_ends);
+    Ok(Json(val))
 }
 
 #[derive(Deserialize)]
@@ -2780,7 +3005,7 @@ async fn add_dead_end(
     data.insert("session_id".into(), Value::String(session_id));
     data.insert("hypothesis".into(), Value::String(body.hypothesis));
     data.insert("reason".into(), Value::String(body.reason));
-    data.insert("agent".into(), Value::String(body.agent.unwrap_or("unknown".into())));
+    data.insert("agent".into(), Value::String(body.agent.unwrap_or_else(|| "unknown".into())));
     data.insert("created_at".into(), Value::String(chrono::Utc::now().to_rfc3339()));
 
     let ws_clone = ws.clone();
@@ -2811,12 +3036,32 @@ async fn get_dead_ends(
 }
 
 // =================== PHASE 3: NIO0 TASKS & LIVE STREAM ===================
+#[derive(Deserialize, Default)]
+struct ListTasksQuery {
+    #[serde(default)]
+    session_id: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    assigned_agent: Option<String>,
+    #[serde(default)]
+    role: Option<String>,
+}
+
 #[derive(Deserialize)]
 struct CreateTaskBody {
     title: String,
     prompt: String,
     #[serde(default = "default_task_priority")]
     priority: String,
+    #[serde(default)]
+    session_id: Option<String>,
+    #[serde(default)]
+    role: Option<String>,
+    #[serde(default)]
+    assigned_agent: Option<String>,
+    #[serde(default)]
+    dependencies: Vec<String>,
     #[serde(default)]
     metadata: Map<String, Value>,
 }
@@ -2827,13 +3072,39 @@ async fn list_tasks_endpoint(
     Extension(principal): Extension<Principal>,
     Extension(id): Extension<RequestId>,
     session: Option<Extension<accounts::SessionIdentity>>,
+    query: Result<Query<ListTasksQuery>, QueryRejection>,
 ) -> Result<Json<Value>, ApiError> {
     let ws = server_workspace(&app);
     authorize(&principal, &ws, &id)?;
+    let q = query.map(|q| q.0).unwrap_or_default();
     let user_id = session.map(|s| s.user.id.clone());
     let ws_clone = ws.clone();
     let records = storage(&app, &id, move |store| {
-        Ok(store.list_visible(&ws_clone, Some("tasks"), user_id.as_deref()))
+        let all = store.list_visible(&ws_clone, Some("tasks"), user_id.as_deref());
+        let filtered: Vec<_> = all.into_iter().filter(|t| {
+            if let Some(sid) = &q.session_id {
+                if t.data.get("session_id").and_then(Value::as_str) != Some(sid) {
+                    return false;
+                }
+            }
+            if let Some(st) = &q.status {
+                if t.data.get("status").and_then(Value::as_str) != Some(st) {
+                    return false;
+                }
+            }
+            if let Some(ag) = &q.assigned_agent {
+                if t.data.get("assigned_agent").and_then(Value::as_str) != Some(ag) {
+                    return false;
+                }
+            }
+            if let Some(role) = &q.role {
+                if t.data.get("role").and_then(Value::as_str) != Some(role) {
+                    return false;
+                }
+            }
+            true
+        }).collect();
+        Ok(filtered)
     }).await?;
 
     let items: Vec<Value> = records.into_iter().map(|art| record_value(public_value(&art))).collect();
@@ -2854,6 +3125,16 @@ async fn create_task_endpoint(
     data.insert("title".into(), Value::String(body.title));
     data.insert("prompt".into(), Value::String(body.prompt));
     data.insert("priority".into(), Value::String(body.priority));
+    if let Some(sid) = body.session_id {
+        data.insert("session_id".into(), Value::String(sid));
+    }
+    if let Some(role) = body.role {
+        data.insert("role".into(), Value::String(role));
+    }
+    if let Some(agent) = body.assigned_agent {
+        data.insert("assigned_agent".into(), Value::String(agent));
+    }
+    data.insert("dependencies".into(), json!(body.dependencies));
     data.insert("status".into(), Value::String("pending".into()));
     data.insert("progress".into(), json!(0));
     data.insert("logs".into(), Value::Array(Vec::new()));
@@ -2902,6 +3183,8 @@ struct UpdateTaskBody {
     #[serde(default)]
     progress: Option<u32>,
     #[serde(default)]
+    assigned_agent: Option<String>,
+    #[serde(default)]
     log_line: Option<String>,
     #[serde(default)]
     result: Option<Value>,
@@ -2918,16 +3201,17 @@ async fn update_task_endpoint(
     let ws = server_workspace(&app);
     authorize(&principal, &ws, &id)?;
     let body = body.map_err(|rejection| body_error(&id, rejection))?.0;
-    let user_id = session.map(|s| s.user.id.clone());
+    let user_id = session.as_ref().map(|s| s.user.id.clone());
     let ws_clone = ws.clone();
     let tid = task_id.clone();
 
-    let mut artifact = storage(&app, &id, move |store| {
+    let artifact = storage(&app, &id, move |store| {
         Ok(store.get_visible(&ws_clone, &tid, user_id.as_deref()))
     }).await?.ok_or_else(|| error(&id, StatusCode::NOT_FOUND, "not_found", "Task not found"))?;
 
+    let mut updates = Map::new();
     if let Some(status) = body.status {
-        artifact.data.insert("status".into(), Value::String(status.clone()));
+        updates.insert("status".into(), Value::String(status.clone()));
         if let Some(line) = body.log_line.as_deref() {
             let _ = app.events.send(json!({
                 "event": format!("task.{}.log", task_id),
@@ -2938,22 +3222,26 @@ async fn update_task_endpoint(
         }
     }
     if let Some(progress) = body.progress {
-        artifact.data.insert("progress".into(), json!(progress));
+        updates.insert("progress".into(), json!(progress));
+    }
+    if let Some(agent) = body.assigned_agent {
+        updates.insert("assigned_agent".into(), Value::String(agent));
     }
     if let Some(result) = body.result {
-        artifact.data.insert("result".into(), result);
+        updates.insert("result".into(), result);
     }
     if let Some(line) = body.log_line {
-        if let Some(logs) = artifact.data.get_mut("logs").and_then(Value::as_array_mut) {
-            logs.push(Value::String(line));
-        }
+        let mut current_logs = artifact.data.get("logs").and_then(Value::as_array).cloned().unwrap_or_default();
+        current_logs.push(Value::String(line));
+        updates.insert("logs".into(), Value::Array(current_logs));
     }
 
     let ws_clone2 = ws.clone();
-    let art_clone = artifact.clone();
+    let tid2 = task_id.clone();
+    let uid = session.as_ref().map(|s| s.user.id.clone());
     let saved = storage(&app, &id, move |store| {
-        store.create(&ws_clone2, "tasks".into(), art_clone.data, None)
-    }).await?;
+        store.update(&ws_clone2, &tid2, updates, true, uid.as_deref())
+    }).await?.ok_or_else(|| error(&id, StatusCode::NOT_FOUND, "not_found", "Task not found"))?;
 
     Ok(Json(record_value(public_value(&saved))))
 }
@@ -4151,6 +4439,25 @@ mod tests {
         let (status, updated_task) = request(&router, "PATCH", &task_path, Some("alice"), update_payload, None).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(updated_task["data"]["status"], "completed");
+
+        // Test Session Agent Switch (NioBridge handoff)
+        let switch_payload = json!({
+            "to_agent": "codex",
+            "reason": "Optimize hot storage path in Rust",
+            "persona": "systems-architect"
+        });
+        let switch_path = format!("/api/v1/sessions/{session_id}/switch");
+        let (status, switch_res) = request(&router, "POST", &switch_path, Some("alice"), switch_payload, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(switch_res["success"], true);
+        assert_eq!(switch_res["active_agent"], "codex");
+        assert!(switch_res["manifest"]["manifest_text"].as_str().unwrap().contains("Optimize hot storage path in Rust"));
+        assert!(switch_res["manifest"]["manifest_text"].as_str().unwrap().contains("Tried using in-memory mutex"));
+
+        // Test Task Query Filtering by Status
+        let (status, tasks_res) = request(&router, "GET", "/api/v1/tasks?status=completed", Some("alice"), Value::Null, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(tasks_res["count"], 1);
     }
 
     #[tokio::test]

@@ -218,6 +218,9 @@ class NioDB {
         const payload = {
           title: options.title || "Untitled Session",
           goal: options.goal || "",
+          agent: options.agent || "agy",
+          model: options.model || undefined,
+          persona: options.persona || "senior-engineer",
           model_tier: options.modelTier || options.model_tier || "strong",
           metadata: options.metadata || {},
         };
@@ -237,6 +240,9 @@ class NioDB {
         const payload = {
           title: options.title || "Untitled Session",
           goal: options.goal || "",
+          agent: options.agent || "agy",
+          model: options.model || undefined,
+          persona: options.persona || "senior-engineer",
           model_tier: options.modelTier || options.model_tier || "strong",
           metadata: options.metadata || {},
         };
@@ -245,6 +251,32 @@ class NioDB {
 
       async get() {
         return db._request(`/api/v1/sessions/${encodeURIComponent(sessionId)}`, "GET");
+      },
+
+      async update(updates = {}) {
+        const payload = {
+          title: updates.title,
+          goal: updates.goal,
+          status: updates.status,
+          active_agent: updates.activeAgent || updates.active_agent,
+          model: updates.model,
+          persona: updates.persona,
+          model_tier: updates.modelTier || updates.model_tier,
+          metadata: updates.metadata,
+        };
+        return db._request(`/api/v1/sessions/${encodeURIComponent(sessionId)}`, "PATCH", payload);
+      },
+
+      async switch(options = {}) {
+        const toAgent = typeof options === "string" ? options : (options.toAgent || options.agent || options.to_agent);
+        const payload = {
+          to_agent: toAgent,
+          model: typeof options === "object" ? options.model : undefined,
+          reason: typeof options === "object" ? options.reason : undefined,
+          persona: typeof options === "object" ? options.persona : undefined,
+          summary_of_work: typeof options === "object" ? (options.summaryOfWork || options.summary_of_work) : undefined,
+        };
+        return db._request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/switch`, "POST", payload);
       },
 
       async appendTurn(options = {}) {
@@ -278,11 +310,88 @@ class NioDB {
     };
   }
 
+  get bridge() {
+    const db = this;
+    return {
+      async create(options = {}) {
+        return db.sessions.create(options);
+      },
+
+      async get(sessionId) {
+        return db.session(sessionId).get();
+      },
+
+      async update(sessionId, updates = {}) {
+        return db.session(sessionId).update(updates);
+      },
+
+      async switch(sessionId, options = {}) {
+        return db.session(sessionId).switch(options);
+      },
+
+      async appendTurn(sessionId, options = {}) {
+        return db.session(sessionId).appendTurn(options);
+      },
+
+      async getManifest(sessionId) {
+        return db.session(sessionId).getManifest();
+      },
+
+      async logDeadEnd(sessionId, options = {}) {
+        return db.session(sessionId).logDeadEnd(options);
+      },
+
+      async getDeadEnds(sessionId) {
+        return db.session(sessionId).getDeadEnds();
+      },
+
+      adapters: {
+        agy: {
+          name: "agy",
+          formatPrompt(manifest, instructions) {
+            const text = typeof manifest === "object" && manifest !== null ? (manifest.manifest_text || JSON.stringify(manifest, null, 2)) : String(manifest);
+            return `[NioBridge Manifest]\n${text}\n\n[Instructions]\n${instructions}`;
+          },
+        },
+        claude: {
+          name: "claude",
+          formatPrompt(manifest, instructions) {
+            const text = typeof manifest === "object" && manifest !== null ? (manifest.manifest_text || JSON.stringify(manifest, null, 2)) : String(manifest);
+            return `<nio_bridge_manifest>\n${text}\n</nio_bridge_manifest>\n\n${instructions}`;
+          },
+        },
+        codex: {
+          name: "codex",
+          formatPrompt(manifest, instructions) {
+            const text = typeof manifest === "object" && manifest !== null ? (manifest.manifest_text || JSON.stringify(manifest, null, 2)) : String(manifest);
+            return `/* NIO_BRIDGE_MANIFEST\n${text}\n*/\n\n${instructions}`;
+          },
+        },
+        cursor: {
+          name: "cursor",
+          formatPrompt(manifest, instructions) {
+            const text = typeof manifest === "object" && manifest !== null ? (manifest.manifest_text || JSON.stringify(manifest, null, 2)) : String(manifest);
+            return `# CONTEXT FROM NIOBRIDGE\n${text}\n\n# TASK\n${instructions}`;
+          },
+        },
+      },
+    };
+  }
+
   get tasks() {
     const db = this;
     return {
-      async list() {
-        return db._request("/api/v1/tasks", "GET");
+      async list(options = {}) {
+        let path = "/api/v1/tasks";
+        const params = [];
+        const sessionId = options.sessionId || options.session_id;
+        if (sessionId) params.push(`session_id=${encodeURIComponent(sessionId)}`);
+        if (options.status) params.push(`status=${encodeURIComponent(options.status)}`);
+        const assignedAgent = options.assignedAgent || options.assigned_agent;
+        if (assignedAgent) params.push(`assigned_agent=${encodeURIComponent(assignedAgent)}`);
+        if (options.role) params.push(`role=${encodeURIComponent(options.role)}`);
+        if (params.length > 0) path += `?${params.join("&")}`;
+        return db._request(path, "GET");
       },
 
       async create(options = {}) {
@@ -290,6 +399,10 @@ class NioDB {
           title: options.title || "Task",
           prompt: options.prompt || "",
           priority: options.priority || "normal",
+          session_id: options.sessionId || options.session_id || undefined,
+          role: options.role || undefined,
+          assigned_agent: options.assignedAgent || options.assigned_agent || undefined,
+          dependencies: options.dependencies || [],
           metadata: options.metadata || {},
         };
         return db._request("/api/v1/tasks", "POST", payload);
@@ -303,10 +416,170 @@ class NioDB {
         const payload = {
           status: updates.status,
           progress: updates.progress,
+          assigned_agent: updates.assignedAgent || updates.assigned_agent,
           log_line: updates.logLine || updates.log_line,
           result: updates.result,
         };
         return db._request(`/api/v1/tasks/${encodeURIComponent(id)}`, "PATCH", payload);
+      },
+    };
+  }
+
+  get assemble() {
+    const db = this;
+    return {
+      nioDecideSwarm(goal = "", options = {}) {
+        const lower = (goal || "").toLowerCase();
+        let planner = { agent: "agy", model: options.plannerModel || options.model || "gemini-2.5-pro", persona: "Systems Architect" };
+        let coder = { agent: "codex", model: options.coderModel || options.model || "gpt-4o", persona: "Core Implementer" };
+        let tester = { agent: "claude", model: options.testerModel || options.model || "claude-3-7-sonnet", persona: "QA & Verification Lead" };
+        let rationale = "Architectural planning with AGY, high-throughput code synthesis with Codex, adversarial verification with Claude.";
+
+        if (lower.includes("frontend") || lower.includes("react") || lower.includes("ui") || lower.includes("css")) {
+          planner = { agent: "claude", model: options.plannerModel || options.model || "claude-3-7-sonnet", persona: "Product & UI Architect" };
+          coder = { agent: "agy", model: options.coderModel || options.model || "gemini-2.5-pro", persona: "UI & Component Specialist" };
+          tester = { agent: "codex", model: options.testerModel || options.model || "gpt-4o", persona: "E2E & Integration Verifier" };
+          rationale = "UI structure led by Claude, component drafting by AGY, E2E test verification by Codex.";
+        } else if (lower.includes("security") || lower.includes("crypto") || lower.includes("merkle") || lower.includes("audit") || lower.includes("rust") || lower.includes("backend")) {
+          planner = { agent: "agy", model: options.plannerModel || options.model || "gemini-2.5-pro", persona: "Cryptographic Systems Architect" };
+          coder = { agent: "codex", model: options.coderModel || options.model || "gpt-4o", persona: "Rust Core Engineer" };
+          tester = { agent: "claude", model: options.testerModel || options.model || "claude-3-7-sonnet", persona: "Formal Verification & Invariants" };
+          rationale = "Formal invariant modeling with AGY, zero-overhead memory-safe Rust with Codex, tamper auditing with Claude.";
+        }
+
+        if (options.model) {
+          planner.model = options.plannerModel || options.model;
+          coder.model = options.coderModel || options.model;
+          tester.model = options.testerModel || options.model;
+        }
+
+        return {
+          lead: "nio",
+          planner,
+          coder,
+          tester,
+          rationale,
+        };
+      },
+
+      async create(options = {}) {
+        let decision = null;
+        let agents;
+        if (!options.agents || options.agents === "auto") {
+          decision = this.nioDecideSwarm(options.goal || "", options);
+          agents = {
+            planner: decision.planner.agent,
+            coder: decision.coder.agent,
+            tester: decision.tester.agent,
+          };
+        } else {
+          agents = options.agents;
+        }
+
+        const session = await db.bridge.create({
+          title: options.title || "Assemble Swarm Session",
+          goal: options.goal || "",
+          agent: agents.planner || "agy",
+          model: options.model || (decision ? decision.planner.model : undefined),
+          persona: decision ? decision.planner.persona : "lead-architect",
+          modelTier: options.modelTier || options.model_tier || "strong",
+          metadata: {
+            swarm_type: "assemble",
+            lead: "nio",
+            agents,
+            decision: decision || undefined,
+            ...(options.metadata || {}),
+          },
+        });
+        return {
+          session,
+          sessionId: session.id,
+          lead: "nio",
+          agents,
+          decision,
+        };
+      },
+
+      async plan(sessionId, prompt, tasks = []) {
+        await db.bridge.appendTurn(sessionId, {
+          agent: "nio_assemble_lead",
+          model: "lead",
+          summary: `Swarm plan created: ${prompt}`,
+          filesTouched: [],
+        });
+
+        const createdTasks = [];
+        for (const t of tasks) {
+          const taskRecord = await db.tasks.create({
+            title: t.title,
+            prompt: t.prompt,
+            priority: t.priority || "normal",
+            sessionId,
+            role: t.role || "coder",
+            assignedAgent: t.assignedAgent || t.assigned_agent,
+            dependencies: t.dependencies || [],
+            metadata: t.metadata || {},
+          });
+          createdTasks.push(taskRecord);
+        }
+        return {
+          sessionId,
+          tasks: createdTasks,
+          count: createdTasks.length,
+        };
+      },
+
+      async claimTask(taskId, agentName) {
+        return db.tasks.update(taskId, {
+          status: "in_progress",
+          assignedAgent: agentName,
+          logLine: `Task claimed by ${agentName}`,
+        });
+      },
+
+      async completeTask(taskId, options = {}) {
+        const result = typeof options === "string" ? { output: options } : (options.result || options);
+        return db.tasks.update(taskId, {
+          status: "completed",
+          progress: 100,
+          result,
+          logLine: options.logLine || options.log_line || "Task completed successfully",
+        });
+      },
+
+      async failTask(taskId, error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        return db.tasks.update(taskId, {
+          status: "failed",
+          logLine: `Task failed: ${errorMsg}`,
+        });
+      },
+
+      async status(sessionId) {
+        const session = await db.bridge.get(sessionId);
+        const tasksRes = await db.tasks.list({ sessionId });
+        const tasks = tasksRes.items || [];
+        const deadEndsRes = await db.bridge.getDeadEnds(sessionId);
+
+        const pending = tasks.filter(t => t.data?.status === "pending").length;
+        const inProgress = tasks.filter(t => t.data?.status === "in_progress").length;
+        const completed = tasks.filter(t => t.data?.status === "completed").length;
+        const failed = tasks.filter(t => t.data?.status === "failed").length;
+
+        return {
+          sessionId,
+          title: session.data?.title || session.title,
+          goal: session.data?.goal || session.goal,
+          activeAgent: session.data?.active_agent,
+          totalTasks: tasks.length,
+          pending,
+          inProgress,
+          completed,
+          failed,
+          allCompleted: tasks.length > 0 && completed === tasks.length,
+          deadEndsCount: deadEndsRes.count || (deadEndsRes.dead_ends ? deadEndsRes.dead_ends.length : 0),
+          tasks,
+        };
       },
     };
   }

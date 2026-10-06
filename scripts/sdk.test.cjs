@@ -61,6 +61,16 @@ before((_, done) => {
       } else if (req.url.startsWith('/api/v1/agent/tools')) {
         res.writeHead(200);
         res.end(JSON.stringify({ tools: [{ name: 'query_database' }] }));
+      } else if (req.url.includes('/switch') && req.method === 'POST') {
+        res.writeHead(200);
+        res.end(JSON.stringify({
+          success: true,
+          session_id: 'sess_1',
+          previous_agent: 'agy',
+          active_agent: parsedBody?.to_agent || 'codex',
+          reason: parsedBody?.reason || 'Handoff',
+          manifest: { session_id: 'sess_1', manifest_text: '### Manifest after switch' }
+        }));
       } else if (req.url.includes('/turns') && req.method === 'POST') {
         res.writeHead(200);
         res.end(JSON.stringify({ success: true, session_id: 'sess_1', turn: parsedBody }));
@@ -73,21 +83,27 @@ before((_, done) => {
       } else if (req.url.includes('/dead-ends') && req.method === 'GET') {
         res.writeHead(200);
         res.end(JSON.stringify({ session_id: 'sess_1', dead_ends: [{ hypothesis: 'bad idea' }], count: 1 }));
+      } else if (req.url.startsWith('/api/v1/sessions/') && req.method === 'PATCH') {
+        res.writeHead(200);
+        res.end(JSON.stringify({ id: 'sess_1', ...parsedBody }));
+      } else if (req.url.startsWith('/api/v1/sessions/') && req.method === 'GET') {
+        res.writeHead(200);
+        res.end(JSON.stringify({ id: 'sess_1', title: 'Session 1', data: { title: 'Session 1', active_agent: 'agy' } }));
       } else if (req.url.startsWith('/api/v1/sessions') && req.method === 'POST') {
         res.writeHead(200);
         res.end(JSON.stringify({ id: 'sess_1', title: parsedBody?.title || 'Session 1' }));
       } else if (req.url.startsWith('/api/v1/sessions') && req.method === 'GET') {
         res.writeHead(200);
         res.end(JSON.stringify({ items: [{ id: 'sess_1' }], count: 1 }));
+      } else if (req.url.startsWith('/api/v1/tasks/') && req.method === 'PATCH') {
+        res.writeHead(200);
+        res.end(JSON.stringify({ id: 'task_1', ...parsedBody, data: { ...parsedBody } }));
       } else if (req.url.startsWith('/api/v1/tasks') && req.method === 'POST') {
         res.writeHead(200);
         res.end(JSON.stringify({ id: 'task_1', ...parsedBody }));
       } else if (req.url.startsWith('/api/v1/tasks') && req.method === 'GET') {
         res.writeHead(200);
-        res.end(JSON.stringify({ items: [{ id: 'task_1' }], count: 1 }));
-      } else if (req.url.startsWith('/api/v1/tasks/task_1') && req.method === 'PATCH') {
-        res.writeHead(200);
-        res.end(JSON.stringify({ id: 'task_1', ...parsedBody }));
+        res.end(JSON.stringify({ items: [{ id: 'task_1', data: { status: 'pending' } }], count: 1 }));
       } else if (req.url.startsWith('/api/v1/events') && req.method === 'POST') {
         res.writeHead(200);
         res.end(JSON.stringify({ success: true, event: parsedBody?.name }));
@@ -232,4 +248,106 @@ test('nio-db.js ledger client', async () => {
   assert.equal(root.root_hash, '9f8a3c2e');
   assert.equal(root.latest_seq, 42);
 });
+
+test('nio-db.js NioBridge multi-agent switching and adapters', async () => {
+  const db = createNioDB({ url: baseUrl });
+
+  // 1. Create Bridge Session
+  const session = await db.bridge.create({
+    title: 'Bridge Integration Session',
+    goal: 'Hot-swap agents with 0 memory loss',
+    agent: 'agy',
+    persona: 'architect',
+  });
+  assert.equal(session.id, 'sess_1');
+
+  // 2. Append Turn
+  const turn = await db.bridge.appendTurn(session.id, {
+    agent: 'agy',
+    model: 'gemini-2.5-pro',
+    summary: 'Designed modular architecture',
+    filesTouched: ['src/api.rs'],
+  });
+  assert.equal(turn.success, true);
+
+  // 3. Log Dead-End
+  const deadEnd = await db.bridge.logDeadEnd(session.id, {
+    hypothesis: 'Single mega-prompt',
+    reason: 'Context overflow',
+    agent: 'agy',
+  });
+  assert.equal(deadEnd.success, true);
+
+  // 4. Switch Agent
+  const switchRes = await db.bridge.switch(session.id, {
+    toAgent: 'codex',
+    reason: 'Implement backend in Rust',
+    persona: 'rust-specialist',
+  });
+  assert.equal(switchRes.success, true);
+  assert.equal(switchRes.active_agent, 'codex');
+  assert.ok(switchRes.manifest);
+
+  // 5. Test Agent Adapters
+  const manifest = await db.bridge.getManifest(session.id);
+  const promptAgy = db.bridge.adapters.agy.formatPrompt(manifest, 'Continue task');
+  assert.ok(promptAgy.includes('[NioBridge Manifest]'));
+  assert.ok(promptAgy.includes('Continue task'));
+
+  const promptClaude = db.bridge.adapters.claude.formatPrompt(manifest, 'Refactor code');
+  assert.ok(promptClaude.includes('<nio_bridge_manifest>'));
+  assert.ok(promptClaude.includes('Refactor code'));
+
+  const promptCodex = db.bridge.adapters.codex.formatPrompt(manifest, 'Write tests');
+  assert.ok(promptCodex.includes('/* NIO_BRIDGE_MANIFEST'));
+  assert.ok(promptCodex.includes('Write tests'));
+
+  const promptCursor = db.bridge.adapters.cursor.formatPrompt(manifest, 'Inspect diff');
+  assert.ok(promptCursor.includes('# CONTEXT FROM NIOBRIDGE'));
+});
+
+test('nio-db.js NioAssemble swarm coordination and status', async () => {
+  const db = createNioDB({ url: baseUrl });
+
+  // 1. Create Assemble Swarm
+  const swarm = await db.assemble.create({
+    title: 'Assemble Refactor Swarm',
+    goal: 'Deliver Merkle V2 and Bridge',
+    agents: {
+      planner: 'agy',
+      coder: 'codex',
+      tester: 'claude',
+    },
+  });
+  assert.ok(swarm.sessionId);
+  assert.equal(swarm.agents.planner, 'agy');
+
+  // 2. Plan and decompose tasks
+  const plan = await db.assemble.plan(swarm.sessionId, 'Step-by-step refactor plan', [
+    { title: 'Update Schema', prompt: 'Add session routes', role: 'coder', assignedAgent: 'codex' },
+    { title: 'Write Tests', prompt: 'Verify session routes', role: 'tester', assignedAgent: 'claude' },
+  ]);
+  assert.equal(plan.count, 2);
+  assert.equal(plan.tasks.length, 2);
+
+  // 3. Claim and update task
+  const claimed = await db.assemble.claimTask('task_1', 'codex');
+  assert.equal(claimed.assigned_agent, 'codex');
+  assert.equal(claimed.status, 'in_progress');
+
+  // 4. Complete task
+  const completed = await db.assemble.completeTask('task_1', { diff: 'added routes' });
+  assert.equal(completed.status, 'completed');
+  assert.equal(completed.progress, 100);
+
+  // 5. Fail task
+  const failed = await db.assemble.failTask('task_1', new Error('Timeout'));
+  assert.equal(failed.status, 'failed');
+
+  // 6. Check Aggregate Status
+  const status = await db.assemble.status(swarm.sessionId);
+  assert.equal(status.sessionId, swarm.sessionId);
+  assert.ok(status.totalTasks >= 1);
+});
+
 
