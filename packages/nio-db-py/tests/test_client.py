@@ -32,6 +32,10 @@ class MockNioDBHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"id": "rec_1", "data": {"key": "value"}}).encode("utf-8"))
         elif self.path.startswith("/api/v1/records"):
             self.wfile.write(json.dumps({"items": [{"id": "rec_1"}], "count": 1}).encode("utf-8"))
+        elif self.path.startswith("/api/v1/ledger/verify"):
+            self.wfile.write(json.dumps({"verified": True, "total_frames": 10, "root_hash": "abc123hash", "latest_seq": 10, "tampering_detected": False}).encode("utf-8"))
+        elif self.path.startswith("/api/v1/ledger/root"):
+            self.wfile.write(json.dumps({"root_hash": "abc123hash", "latest_seq": 10}).encode("utf-8"))
         else:
             self.wfile.write(json.dumps({"status": "ok"}).encode("utf-8"))
 
@@ -183,6 +187,16 @@ class TestNioDBPy(unittest.TestCase):
 
         tools = self.client.get_tools()
         self.assertEqual(len(tools["tools"]), 1)
+
+    def test_ledger(self):
+        rep = self.client.ledger.verify()
+        self.assertTrue(rep["verified"])
+        self.assertFalse(rep["tampering_detected"])
+        self.assertEqual(rep["latest_seq"], 10)
+
+        root = self.client.ledger.root()
+        self.assertEqual(root["root_hash"], "abc123hash")
+        self.assertEqual(root["latest_seq"], 10)
 
 
 if __name__ == "__main__":

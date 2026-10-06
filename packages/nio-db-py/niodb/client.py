@@ -205,6 +205,17 @@ class Tasks:
         return self._client._request(f"/api/v1/tasks/{urllib.parse.quote(task_id)}", method="PATCH", body=payload)
 
 
+class Ledger:
+    def __init__(self, client: "NioDB"):
+        self._client = client
+
+    def verify(self) -> Dict[str, Any]:
+        return self._client._request("/api/v1/ledger/verify", method="GET")
+
+    def root(self) -> Dict[str, Any]:
+        return self._client._request("/api/v1/ledger/root", method="GET")
+
+
 class NioDB:
     def __init__(self, url: str = "http://127.0.0.1:7432", token: Optional[str] = None, client_token: Optional[str] = None, secret_token: Optional[str] = None, workspace_id: Optional[str] = None):
         self.url = url.rstrip("/")
@@ -219,6 +230,7 @@ class NioDB:
         self.workspace_id = workspace_id
         self.sessions = Sessions(self)
         self.tasks = Tasks(self)
+        self.ledger = Ledger(self)
 
     def _request(self, path: str, method: str = "GET", body: Optional[Dict[str, Any]] = None, extra_headers: Optional[Dict[str, str]] = None) -> Any:
         url = f"{self.url}{path}"

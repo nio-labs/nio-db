@@ -94,6 +94,12 @@ before((_, done) => {
       } else if (req.url.startsWith('/api/v1/query') && req.method === 'POST') {
         res.writeHead(200);
         res.end(JSON.stringify({ items: [{ total: 42 }], count: 1 }));
+      } else if (req.url.startsWith('/api/v1/ledger/verify') && req.method === 'GET') {
+        res.writeHead(200);
+        res.end(JSON.stringify({ verified: true, total_frames: 42, root_hash: '9f8a3c2e', latest_seq: 42, tampering_detected: false }));
+      } else if (req.url.startsWith('/api/v1/ledger/root') && req.method === 'GET') {
+        res.writeHead(200);
+        res.end(JSON.stringify({ root_hash: '9f8a3c2e', latest_seq: 42 }));
       } else if (req.url.startsWith('/mcp') && req.method === 'POST') {
         res.writeHead(200);
         res.end(JSON.stringify({ jsonrpc: '2.0', id: parsedBody?.id, result: { tools: [] } }));
@@ -214,3 +220,16 @@ test('nio-db.js mcp client', async () => {
   const res = await db.mcp('tools/list');
   assert.equal(res.jsonrpc, '2.0');
 });
+
+test('nio-db.js ledger client', async () => {
+  const db = createNioDB({ url: baseUrl });
+  const report = await db.ledger.verify();
+  assert.equal(report.verified, true);
+  assert.equal(report.tampering_detected, false);
+  assert.equal(report.latest_seq, 42);
+
+  const root = await db.ledger.root();
+  assert.equal(root.root_hash, '9f8a3c2e');
+  assert.equal(root.latest_seq, 42);
+});
+

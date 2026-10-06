@@ -380,7 +380,17 @@ Each Nio invocation uses an isolated directory and configuration, `--mode ask --
 
 ## Storage and backup
 
-`journal.jsonl` is the recovery authority. TOON files in `artifacts/` are derived, human-readable projections using a basic encoder. They are not an editable database interface; TOON decoding/import and full codec conformance are future work. Missing or mismatched projections are regenerated from the journal at startup.
+`journal.jsonl` and its linked segments in `journal-history/` are the recovery authority. TOON files in `artifacts/` are derived, human-readable projections using a basic encoder. They are not an editable database interface; TOON decoding/import and full codec conformance are future work. Missing or mismatched projections are regenerated from the journal at startup.
+
+Journal v2 uses a SHA-256 hash chain with consecutive sequence numbers. Startup and `/api/v1/ledger/verify` reject sequence gaps, modified frames, missing history, and legacy v1 frames after the first v2 frame. Vacuum retains the previous journal as an immutable archive and writes a compact state snapshot linked to that archive. Snapshot frames consume new sequence numbers; the counter never resets. Verification checks all retained segments, including deletion events. Vacuum reduces the active journal, but retained audit history continues to occupy disk space.
+
+`ledger-head.json` records the durable committed sequence and hash. It detects journal tail deletion across restart when the head record is retained. To detect rollback of the data directory and its head record together, configure a checkpoint outside that directory, on storage protected independently from database-file modification:
+
+```sh
+node bin/niodb.cjs serve --dir ./nio-db --ledger-checkpoint /trusted/niodb-head.json
+```
+
+The parent directory must already exist and be writable by the server. `NIODB_LEDGER_CHECKPOINT` is the equivalent environment variable. A missing checkpoint is initialized from the verified journal on first use; configure it before relying on rollback detection. An existing checkpoint must match a frame in the retained history. Checkpoints are published atomically after the journal is synced and before a mutation succeeds. Recovery accepts complete synced frames beyond an older checkpoint and advances the checkpoint. Protect the external checkpoint from the same actor who can rewrite the database: a hash chain cannot authenticate a rewritten history if that actor can also rewrite all trusted checkpoints. Existing v1 prefixes retain their legacy checksum guarantees. This is a hash chain, not a Merkle tree with inclusion proofs.
 
 One server owns a data directory. Stop it before taking an offline backup:
 
@@ -388,9 +398,9 @@ One server owns a data directory. Stop it before taking an offline backup:
 node bin/niodb.cjs backup --dir ./nio-db --output ./backup.jsonl
 ```
 
-The journal-only command acquires the same exclusive lock and refuses to overwrite the destination. **If you have uploaded files, use the full backup below**; a journal alone cannot restore blobs. To restore a journal-only database with no files, stop the server, create a fresh private directory, copy the backup to `journal.jsonl`, and copy the separately backed-up `auth.json` or provision fresh credentials. Start the server against that directory. Do not overwrite a running or existing database journal. Nio provider configuration is managed separately from database backups.
+The journal-only command acquires the same exclusive lock, verifies the ledger, flattens retained segments into one standalone journal, and refuses to overwrite the destination. If the flattened history would exceed the 64 GiB journal limit, use the full backup command to preserve separate segments. **If you have uploaded files, use the full backup below**; a journal alone cannot restore blobs. To restore a journal-only database with no files, stop the server, create a fresh private directory, copy the backup to `journal.jsonl`, and copy the separately backed-up `auth.json` or provision fresh credentials. Start the server against that directory. Do not overwrite a running or existing database journal. Nio provider configuration is managed separately from database backups.
 
-An incomplete final journal record is truncated on recovery. Complete corrupt records stop startup. Back up credentials separately; removing a principal and restarting revokes its access. Backend credentials have no automatic expiry. App-user sessions expire after seven days and can be revoked with logout.
+An incomplete final journal record is truncated on recovery only when no committed checkpoint requires it. Missing acknowledged frames and complete corrupt records stop startup without truncating the journal. Back up credentials separately; removing a principal and restarting revokes its access. Backend credentials have no automatic expiry. App-user sessions expire after seven days and can be revoked with logout.
 
 ### Full backup with files
 
@@ -400,7 +410,7 @@ Stop the server, then run:
 node bin/niodb.cjs backup --dir ./nio-db --include-files --output ./nio-db-backup
 ```
 
-The destination must be a new directory. It contains the consistent journal and every referenced blob; the source directory's exclusive lock stays held during the copy. Copy your separately backed-up backend `auth.json` into a restored directory, or provision fresh backend credentials. To restore, copy the backup directory to a new private data directory and start against it. It recreates TOON projections and verifies blob hashes. Password hashes and app sessions are in the journal, so treat backups as private. Provider configuration is separate. Do not restore while a server is running.
+The destination must be a new directory. It contains the active journal, all linked audit segments, the local head checkpoint, and every referenced blob; the source directory's exclusive lock stays held during the copy. Copy your separately backed-up backend `auth.json` into a restored directory, or provision fresh backend credentials. To restore, copy the backup directory to a new private data directory and start against it. It recreates TOON projections and verifies blob hashes. Keep an external checkpoint separate from backups; it intentionally rejects a restore older than its committed head. Restoring an older backup requires an explicit administrative choice of a new checkpoint path, with a new trust baseline. Password hashes and app sessions are in the journal, so treat backups as private. Provider configuration is separate. Do not restore while a server is running.
 
 ## Web Console Dashboard
 

@@ -113,6 +113,21 @@ export interface EventsClient {
   publish(name: string, data?: Record<string, any>): Promise<any>;
 }
 
+export interface LedgerReport {
+  verified: boolean;
+  total_frames: number;
+  root_hash: string;
+  genesis_hash: string;
+  latest_seq: number;
+  tampering_detected: boolean;
+  error?: string | null;
+}
+
+export interface LedgerClient {
+  verify(): Promise<LedgerReport>;
+  root(): Promise<{ root_hash: string; latest_seq: number }>;
+}
+
 export interface SessionsClient {
   list(): Promise<{ items: any[]; count: number }>;
   create(options: CreateSessionOptions): Promise<any>;
@@ -131,6 +146,8 @@ export class NioDB {
   session(sessionId: string): SessionClient;
   readonly tasks: TasksClient;
   readonly events: EventsClient;
+  readonly ledger: LedgerClient;
 }
 
 export function createNioDB(options?: NioDBOptions): NioDB;
+

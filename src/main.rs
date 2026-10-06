@@ -35,6 +35,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .or_else(|| "127.0.0.1:5433".parse().ok());
     let mut pg_password = env::var("NIODB_PG_PASSWORD").ok();
     let mut auth_file = env::var_os("NIODB_AUTH_FILE").map(PathBuf::from);
+    let mut ledger_checkpoint = env::var_os("NIODB_LEDGER_CHECKPOINT").map(PathBuf::from);
     let mut executable =
         PathBuf::from(env::var_os("NIODB_NIO_BIN").unwrap_or_else(|| "nio".into()));
     let mut timeout = 60u64;
@@ -58,7 +59,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         match arg.as_str() {
             "--help" | "-h" => {
                 println!(
-                    "NioDB — The Agentic DB that works.\nA lightweight database with natural-language queries, powered by Nio.\n\nUsage: nio-db [serve|init-auth|add-secret|backup] [OPTIONS]\n\n  --dir PATH             Server data directory (default: nio-db)\n  --listen IP:PORT       Listen address (default: 127.0.0.1:7432)\n  --pg-listen IP:PORT    PostgreSQL wire protocol listen address (default: 127.0.0.1:5433)\n  --pg-password PASS     PostgreSQL password (default: secret token from data dir)\n  --no-pg                Disable PostgreSQL wire protocol connector\n  --auth-file PATH       Hashed bearer credentials (default: DIR/auth.json)\n  --nio-bin PATH         Nio CLI executable (default: nio on PATH)\n  --nio-timeout SECONDS  Timeout per Nio invocation (default: 60)\n  --node-bin PATH        Node executable for AlaSQL (default: node on PATH)\n  --alasql-helper PATH   AlaSQL helper script\n  --name NAME            Principal name for init-auth (default: nio)\n  --skill NAME           Nio skill grant for init-auth; repeatable\n  --plugin NAME          Nio plugin discovery grant; repeatable\n  --output PATH          New backup destination; stop the server before backup\n  --include-files        Back up journal and blobs into a new directory\n  --seed-demo            Add starter examples to an existing database once\n  --no-demo              Skip starter examples on first launch\n  --version              Print version\n\ninit-auth creates client and secret bearer tokens and prints both once.\nadd-secret adds or rotates the secret token; save its output privately.\nThe server invokes Nio for read-only natural-language assistance."
+                    "NioDB — The Agentic DB that works.\nA lightweight database with natural-language queries, powered by Nio.\n\nUsage: nio-db [serve|init-auth|add-secret|backup] [OPTIONS]\n\n  --dir PATH             Server data directory (default: nio-db)\n  --listen IP:PORT       Listen address (default: 127.0.0.1:7432)\n  --pg-listen IP:PORT    PostgreSQL wire protocol listen address (default: 127.0.0.1:5433)\n  --pg-password PASS     PostgreSQL password (default: secret token from data dir)\n  --no-pg                Disable PostgreSQL wire protocol connector\n  --auth-file PATH       Hashed bearer credentials (default: DIR/auth.json)\n  --ledger-checkpoint PATH  Durable ledger head outside DIR (NIODB_LEDGER_CHECKPOINT)\n  --nio-bin PATH         Nio CLI executable (default: nio on PATH)\n  --nio-timeout SECONDS  Timeout per Nio invocation (default: 60)\n  --node-bin PATH        Node executable for AlaSQL (default: node on PATH)\n  --alasql-helper PATH   AlaSQL helper script\n  --name NAME            Principal name for init-auth (default: nio)\n  --skill NAME           Nio skill grant for init-auth; repeatable\n  --plugin NAME          Nio plugin discovery grant; repeatable\n  --output PATH          New backup destination; stop the server before backup\n  --include-files        Back up journal and blobs into a new directory\n  --seed-demo            Add starter examples to an existing database once\n  --no-demo              Skip starter examples on first launch\n  --version              Print version\n\ninit-auth creates client and secret bearer tokens and prints both once.\nadd-secret adds or rotates the secret token; save its output privately.\nThe server invokes Nio for read-only natural-language assistance."
                 );
                 return Ok(());
             }
@@ -83,6 +84,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 helper = PathBuf::from(args.next().ok_or("--alasql-helper requires a path")?)
             }
             "--dir" => data = PathBuf::from(args.next().ok_or("--dir requires a path")?),
+            "--ledger-checkpoint" => {
+                ledger_checkpoint = Some(PathBuf::from(args.next().ok_or("--ledger-checkpoint requires a path")?));
+            }
             "--listen" => listen = args.next().ok_or("--listen requires an address")?.parse()?,
             "--pg-listen" => {
                 pg_listen = Some(args.next().ok_or("--pg-listen requires an address")?.parse()?)
@@ -133,7 +137,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     if backup {
         let destination = output.ok_or("backup requires --output PATH")?;
-        let store = Store::open(&data)?;
+        let store = Store::open_with_checkpoint(&data, ledger_checkpoint.as_deref())?;
         if include_files {
             store.backup_full(&destination)?;
         } else {
@@ -145,7 +149,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     if init {
         if workspaces.is_empty() {
             let existing = if data.join("journal.jsonl").exists() {
-                Store::open(&data)?.single_workspace()?
+                Store::open_with_checkpoint(&data, ledger_checkpoint.as_deref())?.single_workspace()?
             } else {
                 None
             };
@@ -171,7 +175,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     if scopes.len() != 1 {
         return Err("NioDB uses one workspace per server. Configure credentials for one existing workspace; stored data is not modified.".into());
     }
-    let mut store = Store::open(&data)?;
+    let mut store = Store::open_with_checkpoint(&data, ledger_checkpoint.as_deref())?;
     if let Some(scope) = store.single_workspace()? {
         for principal in &mut principals {
             principal.workspaces = vec![scope.clone()];

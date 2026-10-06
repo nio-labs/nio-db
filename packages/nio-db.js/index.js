@@ -319,6 +319,18 @@ class NioDB {
       },
     };
   }
+
+  get ledger() {
+    const db = this;
+    return {
+      async verify() {
+        return db._request("/api/v1/ledger/verify", "GET");
+      },
+      async root() {
+        return db._request("/api/v1/ledger/root", "GET");
+      },
+    };
+  }
 }
 
 function createNioDB(options = {}) {

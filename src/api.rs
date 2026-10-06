@@ -175,6 +175,8 @@ pub fn router(app: App) -> Router {
         .route("/api/v1/plugins", get(plugins))
         // Phase 1 & 2: Agentic, Vector Search & Tools
         .route("/api/v1/admin/vacuum", post(admin_vacuum))
+        .route("/api/v1/ledger/verify", get(ledger_verify))
+        .route("/api/v1/ledger/root", get(ledger_root))
         .route("/api/v1/records/search", post(search_records_vector))
         .route("/api/v1/agent/tools", get(agent_tools))
         .route("/api/v1/tools", get(agent_tools))
@@ -1983,6 +1985,35 @@ async fn admin_vacuum(
         "success": true,
         "stats": stats
     })))
+}
+
+// =================== CRYPTOGRAPHIC MERKLE LEDGER ===================
+async fn ledger_verify(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    Extension(id): Extension<RequestId>,
+) -> Result<Json<Value>, ApiError> {
+    let ws = server_workspace(&app);
+    authorize(&principal, &ws, &id)?;
+    let report = storage(&app, &id, |store| store.verify_ledger()).await?;
+    Ok(Json(json!(report)))
+}
+
+async fn ledger_root(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    Extension(id): Extension<RequestId>,
+) -> Result<Json<Value>, ApiError> {
+    let ws = server_workspace(&app);
+    authorize(&principal, &ws, &id)?;
+    let res = storage(&app, &id, |store| {
+        Ok(json!({
+            "root_hash": store.root_hash(),
+            "latest_seq": store.last_seq()
+        }))
+    })
+    .await?;
+    Ok(Json(res))
 }
 
 // =================== PHASE 2: VECTOR SEARCH ===================
@@ -3930,6 +3961,45 @@ mod tests {
         let (status, vacuum_res) = request(&router, "POST", "/api/v1/admin/vacuum", Some("alice"), Value::Null, None).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(vacuum_res["success"], true);
+    }
+
+    #[tokio::test]
+    async fn merkle_ledger_api_verify_and_root() {
+        let directory = Directory::new();
+        let router = router(app(&directory, Duration::from_secs(2)));
+
+        // Unauthenticated access fails
+        let (status, _) = request(&router, "GET", "/api/v1/ledger/verify", None, Value::Null, None).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+        // Authenticated verify on fresh db
+        let (status, verify_res) = request(&router, "GET", "/api/v1/ledger/verify", Some("alice"), Value::Null, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(verify_res["verified"], true);
+        assert_eq!(verify_res["tampering_detected"], false);
+        assert_eq!(verify_res["total_frames"], 0);
+        assert_eq!(verify_res["root_hash"], crate::storage::GENESIS_HASH);
+
+        // Create a record
+        let create_doc = json!({
+            "collection": "audit_logs",
+            "data": { "action": "agent_transfer", "amount": 1000 }
+        });
+        let (status, _record) = request(&router, "POST", "/api/v1/records", Some("alice"), create_doc, None).await;
+        assert_eq!(status, StatusCode::CREATED);
+
+        // Check root and verify
+        let (status, root_res) = request(&router, "GET", "/api/v1/ledger/root", Some("alice"), Value::Null, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(root_res["latest_seq"], 1);
+        assert_ne!(root_res["root_hash"], crate::storage::GENESIS_HASH);
+
+        let (status, verify_res2) = request(&router, "GET", "/api/v1/ledger/verify", Some("alice"), Value::Null, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(verify_res2["verified"], true);
+        assert_eq!(verify_res2["total_frames"], 1);
+        assert_eq!(verify_res2["latest_seq"], 1);
+        assert_eq!(verify_res2["root_hash"], root_res["root_hash"]);
     }
 
     #[tokio::test]

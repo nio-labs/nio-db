@@ -143,13 +143,13 @@ if (await agentValidator.verify(branch)) {
 
 ---
 
-### 6. 🛡️ Cryptographic Merkle Provenance *(Tamper-Proof Ledger)*
-An immutable, mathematically verifiable audit trail for legal, financial, and autonomous agent accountability.
+### 6. 🛡️ Cryptographic Journal Provenance *(Tamper-Evident Hash Chain)*
+A retained audit trail backed by a SHA-256 hash chain and durable head checkpoints.
 
-* **SHA-256 Hash Chaining**: Every journal frame includes a cryptographic hash of the preceding frame, creating an unbreakable Merkle chain.
-* **Tamper-Evident Integrity**: Any unauthorized manual modification, deletion, or reordering of journal files is detected immediately (`db.ledger.verify()`).
+* **SHA-256 Hash Chaining**: Every v2 journal frame includes its sequence number and the preceding frame hash. Vacuum retains linked historical segments and continues the sequence.
+* **Tamper-Evident Integrity**: Verification checks the retained chain and committed head (`db.ledger.verify()`). Detecting rollback of the entire data directory requires an independently protected external checkpoint; legacy v1 prefixes retain checksum-only guarantees.
 * **Authorized Deletes Preserved**: Standard deletions via SDK or REST API append auditable deletion tombstones without breaking the cryptographic chain.
-* **Zero Performance Cost**: Hardware-accelerated SHA-256 takes ~200 nanoseconds per frame in Rust, preserving 50,000+ rec/s ingestion speed.
+* **Durable Commit Head**: A synced journal frame and atomically published head checkpoint precede a successful mutation. These durability operations have a performance cost; throughput depends on storage and workload.
 
 ```typescript
 // Verify entire database integrity

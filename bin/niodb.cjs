@@ -97,7 +97,7 @@ function option(args, name) {
 }
 
 function startupCommand(args) {
-  const values = new Set(['--dir', '--listen', '--auth-file', '--nio-bin', '--nio-timeout', '--node-bin', '--alasql-helper', '--name', '--workspace', '--skill', '--plugin', '--output']);
+  const values = new Set(['--dir', '--listen', '--auth-file', '--ledger-checkpoint', '--nio-bin', '--nio-timeout', '--node-bin', '--alasql-helper', '--name', '--workspace', '--skill', '--plugin', '--output']);
   let command = 'serve';
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];

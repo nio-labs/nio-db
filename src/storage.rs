@@ -66,6 +66,7 @@ mod tests {
         let mut store = Store::open(&directory.0).unwrap();
         let base = store.create("a", "records".into(), serde_json::json!({"value":0}).as_object().unwrap().clone(), None).unwrap();
         let prefix = fs::read(directory.0.join("journal.jsonl")).unwrap();
+        let prefix_head = fs::read(directory.0.join("ledger-head.json")).unwrap();
         let items = || (1..=25).map(|i| (Some("records".into()), serde_json::json!({"value":i,"ttl":3600}).as_object().unwrap().clone())).collect();
         let mut invalid: Vec<_> = items();
         invalid.push((Some("".into()), Map::new()));
@@ -84,9 +85,10 @@ mod tests {
         assert_eq!(store.list("a", None).len(), 26);
         assert_ne!(fs::read_to_string(&cache).unwrap(), "damaged cache");
         drop(store);
-        // A crash anywhere within the final frame leaves the whole batch absent.
+        // A crash before the final frame/checkpoint becomes durable leaves the batch absent.
         let partial = &committed[..prefix.len() + (committed.len() - prefix.len()) / 2];
         fs::write(directory.0.join("journal.jsonl"), partial).unwrap();
+        fs::write(directory.0.join("ledger-head.json"), prefix_head).unwrap();
         let store = Store::open(&directory.0).unwrap();
         assert_eq!(store.list("a", None).len(), 1);
         assert_eq!(store.list("a", None)[0].id, base.id);
@@ -261,6 +263,651 @@ mod tests {
         store.delete_user("ws_a", &user1.id).unwrap();
         assert_eq!(store.users("ws_a").len(), 1);
     }
+
+    #[test]
+    fn merkle_provenance_hash_chain_and_verify() {
+        let directory = Directory::new();
+        let mut store = Store::open(&directory.0).unwrap();
+        assert_eq!(store.last_seq(), 0);
+        assert_eq!(store.root_hash(), GENESIS_HASH);
+
+        let r1 = store.create("w1", "items".into(), json!({"val": 1}).as_object().unwrap().clone(), None).unwrap();
+        assert_eq!(store.last_seq(), 1);
+        let h1 = store.root_hash().to_string();
+        assert_ne!(h1, GENESIS_HASH);
+
+        let _r2 = store.create("w1", "items".into(), json!({"val": 2}).as_object().unwrap().clone(), None).unwrap();
+        assert_eq!(store.last_seq(), 2);
+        let h2 = store.root_hash().to_string();
+        assert_ne!(h2, h1);
+
+        store.delete("w1", &r1.id, None).unwrap();
+        assert_eq!(store.last_seq(), 3);
+        let h3 = store.root_hash().to_string();
+        assert_ne!(h3, h2);
+
+        let report = store.verify_ledger().unwrap();
+        assert!(report.verified);
+        assert!(!report.tampering_detected);
+        assert_eq!(report.total_frames, 3);
+        assert_eq!(report.latest_seq, 3);
+        assert_eq!(report.root_hash, h3);
+        assert_eq!(report.genesis_hash, GENESIS_HASH);
+
+        // Reopening store re-verifies the chain and keeps head hash
+        drop(store);
+        let store2 = Store::open(&directory.0).unwrap();
+        assert_eq!(store2.last_seq(), 3);
+        assert_eq!(store2.root_hash(), h3);
+    }
+
+    #[test]
+    fn merkle_provenance_detects_frame_omission_and_reordering() {
+        let directory = Directory::new();
+        let mut store = Store::open(&directory.0).unwrap();
+        for i in 1..=3 {
+            store.create("w", "items".into(), json!({"i": i}).as_object().unwrap().clone(), None).unwrap();
+        }
+        drop(store);
+
+        let journal_path = directory.0.join("journal.jsonl");
+        let content = fs::read_to_string(&journal_path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 3);
+
+        // Case 1: Omission (delete middle frame)
+        let omitted = format!("{}\n{}\n", lines[0], lines[2]);
+        fs::write(&journal_path, omitted).unwrap();
+        assert!(Store::open(&directory.0).is_err());
+
+        // Case 2: Reordering (swap frame 1 and 2)
+        let swapped = format!("{}\n{}\n{}\n", lines[1], lines[0], lines[2]);
+        fs::write(&journal_path, swapped).unwrap();
+        assert!(Store::open(&directory.0).is_err());
+
+        // Case 3: In-place tampering
+        let tampered = format!("{}\n{}\n{}\n", lines[0].replace("\"i\":1", "\"i\":99"), lines[1], lines[2]);
+        fs::write(&journal_path, tampered).unwrap();
+        assert!(Store::open(&directory.0).is_err());
+    }
+
+    #[test]
+    fn merkle_provenance_vacuum_preserves_valid_chain() {
+        let directory = Directory::new();
+        let mut store = Store::open(&directory.0).unwrap();
+        let r1 = store.create("w", "notes".into(), json!({"text": "hello"}).as_object().unwrap().clone(), None).unwrap();
+        let _r2 = store.create("w", "notes".into(), json!({"text": "world"}).as_object().unwrap().clone(), None).unwrap();
+        store.delete("w", &r1.id, None).unwrap();
+        assert_eq!(store.last_seq(), 3);
+
+        let stats = store.vacuum().unwrap();
+        assert_eq!(stats.active_artifacts, 1);
+        assert_eq!(store.last_seq(), 5); // reset + active artifact follow the old head
+
+        let report = store.verify_ledger().unwrap();
+        assert!(report.verified);
+        assert!(!report.tampering_detected);
+        assert_eq!(report.total_frames, 5);
+
+        drop(store);
+        let store2 = Store::open(&directory.0).unwrap();
+        assert_eq!(store2.last_seq(), 5);
+        assert!(store2.verify_ledger().unwrap().verified);
+    }
+
+    #[test]
+    fn merkle_v2_rejects_duplicate_gap_and_missing_sequence() {
+        let directory = Directory::new();
+        let mut store = Store::open(&directory.0).unwrap();
+        for i in 0..3 {
+            store
+                .create(
+                    "w",
+                    "items".into(),
+                    json!({"i": i}).as_object().unwrap().clone(),
+                    None,
+                )
+                .unwrap();
+        }
+        let path = directory.0.join("journal.jsonl");
+        let original = fs::read_to_string(&path).unwrap();
+        let entries: Vec<Entry> = original
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        for sequence in [Some(1), Some(3), None] {
+            let mut modified = entries.clone();
+            modified[1].seq = sequence;
+            // Recompute the hash so the sequence check itself must reject it.
+            if let Some(seq) = sequence {
+                modified[1].hash = Some(compute_frame_hash(
+                    seq,
+                    modified[1].prev_hash.as_deref().unwrap(),
+                    &serde_json::to_vec(&modified[1].payload).unwrap(),
+                ));
+            }
+            let bytes: String = modified
+                .iter()
+                .map(|entry| format!("{}\n", serde_json::to_string(entry).unwrap()))
+                .collect();
+            fs::write(&path, bytes).unwrap();
+            let report = store.verify_ledger().unwrap();
+            assert!(!report.verified);
+            assert!(report.tampering_detected);
+            assert!(report.error.unwrap().contains("sequence discontinuity"));
+            assert!(Store::open(&directory.0).is_err());
+        }
+        fs::write(path, original).unwrap();
+    }
+
+    #[test]
+    fn merkle_v2_sequence_continues_after_restart_and_failed_validation() {
+        let directory = Directory::new();
+        let mut store = Store::open(&directory.0).unwrap();
+        store.create("w", "items".into(), Map::new(), None).unwrap();
+        let root = store.root_hash().to_string();
+        assert!(
+            store
+                .bulk_insert("w", None, vec![(Some("".into()), Map::new())])
+                .is_err()
+        );
+        assert_eq!(store.last_seq(), 1);
+        assert_eq!(store.root_hash(), root);
+        drop(store);
+        let mut store = Store::open(&directory.0).unwrap();
+        store.create("w", "items".into(), Map::new(), None).unwrap();
+        let content = fs::read_to_string(directory.0.join("journal.jsonl")).unwrap();
+        let entries: Vec<Entry> = content
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert!(entries.iter().all(|entry| entry.version == 2));
+        assert_eq!(entries[1].seq, Some(2));
+        assert_eq!(entries[1].prev_hash.as_deref(), Some(root.as_str()));
+        assert!(store.verify_ledger().unwrap().verified);
+    }
+
+    #[test]
+    fn merkle_v2_complete_tail_deletion_rejected_live_and_after_restart() {
+        let directory = Directory::new();
+        let mut store = Store::open(&directory.0).unwrap();
+        for _ in 0..3 {
+            store.create("w", "items".into(), Map::new(), None).unwrap();
+        }
+        let path = directory.0.join("journal.jsonl");
+        let original_root = store.root_hash().to_string();
+        let content = fs::read_to_string(&path).unwrap();
+        let shortened = format!(
+            "{}\n",
+            content.lines().take(2).collect::<Vec<_>>().join("\n")
+        );
+        fs::write(&path, shortened).unwrap();
+        let report = store.verify_ledger().unwrap();
+        assert!(!report.verified);
+        assert!(report.tampering_detected);
+        assert_eq!(report.latest_seq, 2);
+        assert_ne!(report.root_hash, original_root);
+        drop(store);
+        assert!(Store::open(&directory.0).is_err());
+    }
+
+    #[test]
+    fn merkle_v2_legacy_downgrade_rejected() {
+        let directory = Directory::new();
+        let mut store = Store::open(&directory.0).unwrap();
+        for i in 0..3 {
+            store
+                .create(
+                    "w",
+                    "items".into(),
+                    json!({"i": i}).as_object().unwrap().clone(),
+                    None,
+                )
+                .unwrap();
+        }
+        let path = directory.0.join("journal.jsonl");
+        let content = fs::read_to_string(&path).unwrap();
+        let mut entries: Vec<Entry> = content
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        // Retain a genuine v2 prefix, then replace its suffix with legacy frames.
+        // Legacy checksums have no dependency on the preceding frame.
+        for entry in &mut entries[1..] {
+            entry.version = 1;
+            entry.seq = None;
+            entry.prev_hash = None;
+            entry.hash = None;
+            entry.sha256 = Some(hex(&Sha256::digest(
+                serde_json::to_vec(&entry.payload).unwrap(),
+            )));
+        }
+        entries.swap(1, 2);
+        let bytes: String = entries
+            .iter()
+            .map(|entry| format!("{}\n", serde_json::to_string(entry).unwrap()))
+            .collect();
+        fs::write(path, bytes).unwrap();
+        let report = store.verify_ledger().unwrap();
+        assert!(!report.verified);
+        assert!(report.error.unwrap().contains("downgrade"));
+        drop(store);
+        assert!(Store::open(&directory.0).is_err());
+    }
+
+    #[test]
+    fn merkle_v2_legacy_prefix_migrates_and_survives_vacuum() {
+        let directory = Directory::new();
+        let mut store = Store::open(&directory.0).unwrap();
+        store.create("w", "items".into(), Map::new(), None).unwrap();
+        drop(store);
+        let path = directory.0.join("journal.jsonl");
+        let mut entry: Entry = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        entry.version = 1;
+        entry.seq = None;
+        entry.prev_hash = None;
+        entry.hash = None;
+        entry.sha256 = Some(hex(&Sha256::digest(
+            serde_json::to_vec(&entry.payload).unwrap(),
+        )));
+        fs::write(
+            path,
+            format!("{}\n", serde_json::to_string(&entry).unwrap()),
+        )
+        .unwrap();
+        fs::remove_file(directory.0.join("ledger-head.json")).unwrap(); // pre-checkpoint legacy fixture
+        let mut store = Store::open(&directory.0).unwrap();
+        store.create("w", "items".into(), Map::new(), None).unwrap();
+        assert_eq!(store.last_seq(), 2);
+        assert!(store.verify_ledger().unwrap().verified);
+        store.vacuum().unwrap();
+        let seq = store.last_seq();
+        drop(store);
+        let store = Store::open(&directory.0).unwrap();
+        assert_eq!(store.last_seq(), seq);
+        assert_eq!(store.list("w", None).len(), 2);
+        assert!(store.verify_ledger().unwrap().verified);
+    }
+
+    #[test]
+    fn merkle_v2_repeated_vacuum_retains_audit_idempotency_and_restorable_backup() {
+        let directory = Directory::new();
+        let mut store = Store::open(&directory.0).unwrap();
+        let data = json!({"value": 1}).as_object().unwrap().clone();
+        let record = store
+            .create("w", "items".into(), data.clone(), Some("retry".into()))
+            .unwrap();
+        let deleted = store.create("w", "items".into(), Map::new(), None).unwrap();
+        store.delete("w", &deleted.id, None).unwrap();
+        let original = fs::read(directory.0.join("journal.jsonl")).unwrap();
+        let original_hash = store.root_hash().to_string();
+        let mut previous_seq = store.last_seq();
+        for _ in 0..3 {
+            store.vacuum().unwrap();
+            assert!(store.last_seq() > previous_seq);
+            previous_seq = store.last_seq();
+            assert_eq!(
+                store
+                    .create("w", "items".into(), data.clone(), Some("retry".into()))
+                    .unwrap()
+                    .id,
+                record.id
+            );
+            assert_eq!(store.last_seq(), previous_seq); // retry remains a no-op
+            assert!(store.verify_ledger().unwrap().verified);
+        }
+        assert_eq!(
+            fs::read(
+                directory
+                    .0
+                    .join("journal-history")
+                    .join(format!("{original_hash}.jsonl"))
+            )
+            .unwrap(),
+            original
+        );
+        let restored = Directory::new();
+        store.backup(&restored.0.join("journal.jsonl")).unwrap();
+        let mut backup = Store::open(&restored.0).unwrap();
+        assert_eq!(backup.last_seq(), store.last_seq());
+        assert_eq!(backup.root_hash(), store.root_hash());
+        assert_eq!(backup.list("w", None).len(), 1);
+        assert!(backup.get("w", &deleted.id).is_none());
+        assert_eq!(
+            backup
+                .create("w", "items".into(), data, Some("retry".into()))
+                .unwrap()
+                .id,
+            record.id
+        );
+        let full_backup = directory.0.join("full-backup");
+        store.backup_full(&full_backup).unwrap();
+        let restored = Store::open(&full_backup).unwrap();
+        assert_eq!(restored.last_seq(), store.last_seq());
+        assert_eq!(restored.root_hash(), store.root_hash());
+        assert_eq!(restored.list("w", None).len(), 1);
+        assert!(restored.verify_ledger().unwrap().verified);
+        assert!(
+            full_backup
+                .join("journal-history")
+                .join(format!("{original_hash}.jsonl"))
+                .exists()
+        );
+        drop(store);
+        let mut store = Store::open(&directory.0).unwrap();
+        assert_eq!(store.last_seq(), previous_seq);
+        store.create("w", "items".into(), Map::new(), None).unwrap();
+        assert_eq!(store.last_seq(), previous_seq + 1);
+    }
+
+    #[test]
+    fn merkle_v2_archived_tampering_and_missing_history_rejected() {
+        let directory = Directory::new();
+        let mut store = Store::open(&directory.0).unwrap();
+        store
+            .create(
+                "w",
+                "items".into(),
+                json!({"value": 1}).as_object().unwrap().clone(),
+                None,
+            )
+            .unwrap();
+        let hash = store.root_hash().to_string();
+        store.vacuum().unwrap();
+        let archive = directory
+            .0
+            .join("journal-history")
+            .join(format!("{hash}.jsonl"));
+        let original = fs::read_to_string(&archive).unwrap();
+        fs::write(&archive, original.replace("\"value\":1", "\"value\":2")).unwrap();
+        assert!(!store.verify_ledger().unwrap().verified);
+        drop(store);
+        assert!(Store::open(&directory.0).is_err());
+        fs::remove_file(&archive).unwrap();
+        assert!(Store::open(&directory.0).is_err());
+    }
+
+    #[test]
+    fn merkle_v2_external_checkpoint_rejects_directory_rollback() {
+        let directory = Directory::new();
+        let trusted = Directory::new();
+        let checkpoint = trusted.0.join("head.json");
+        let mut store = Store::open_with_checkpoint(&directory.0, Some(&checkpoint)).unwrap();
+        store.create("w", "items".into(), Map::new(), None).unwrap();
+        let old_journal = fs::read(directory.0.join("journal.jsonl")).unwrap();
+        let old_head = fs::read(directory.0.join("ledger-head.json")).unwrap();
+        store.create("w", "items".into(), Map::new(), None).unwrap();
+        store.vacuum().unwrap();
+        drop(store);
+        fs::write(directory.0.join("journal.jsonl"), old_journal).unwrap();
+        fs::write(directory.0.join("ledger-head.json"), old_head).unwrap();
+        let error = Store::open_with_checkpoint(&directory.0, Some(&checkpoint))
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("rollback"));
+    }
+
+    #[test]
+    fn merkle_v2_recovery_accepts_durable_frames_ahead_of_checkpoint() {
+        let directory = Directory::new();
+        let mut store = Store::open(&directory.0).unwrap();
+        store.create("w", "items".into(), Map::new(), None).unwrap();
+        let old_head = fs::read(directory.0.join("ledger-head.json")).unwrap();
+        store.create("w", "items".into(), Map::new(), None).unwrap();
+        store.vacuum().unwrap();
+        let latest_seq = store.last_seq();
+        let latest_hash = store.root_hash().to_string();
+        drop(store);
+        // Simulate a crash after journal replacement but before head publication.
+        fs::write(directory.0.join("ledger-head.json"), old_head).unwrap();
+        OpenOptions::new()
+            .append(true)
+            .open(directory.0.join("journal.jsonl"))
+            .unwrap()
+            .write_all(b"{\"partial\":")
+            .unwrap();
+        let store = Store::open(&directory.0).unwrap();
+        assert_eq!(store.last_seq(), latest_seq);
+        assert_eq!(store.root_hash(), latest_hash);
+        assert!(store.verify_ledger().unwrap().verified);
+        let head = read_checkpoint(&directory.0.join("ledger-head.json"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(head.latest_seq, latest_seq);
+    }
+
+    #[test]
+    fn merkle_v2_recovery_never_truncates_acknowledged_frame() {
+        let directory = Directory::new();
+        let mut store = Store::open(&directory.0).unwrap();
+        store.create("w", "items".into(), Map::new(), None).unwrap();
+        drop(store);
+        let path = directory.0.join("journal.jsonl");
+        let bytes = fs::read(&path).unwrap();
+        let partial = &bytes[..bytes.len() / 2];
+        fs::write(&path, partial).unwrap();
+        assert!(Store::open(&directory.0).is_err());
+        assert_eq!(fs::read(path).unwrap(), partial);
+    }
+
+    #[test]
+    fn merkle_v2_failed_vacuum_leaves_live_state_and_journal_unchanged() {
+        let directory = Directory::new();
+        let mut store = Store::open(&directory.0).unwrap();
+        let expired = store
+            .create(
+                "w",
+                "items".into(),
+                json!({"expires_at":"2000-01-01T00:00:00Z"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+                None,
+            )
+            .unwrap();
+        let original = fs::read(directory.0.join("journal.jsonl")).unwrap();
+        let original_hash = store.root_hash().to_string();
+        fs::write(
+            directory.0.join("journal-history"),
+            "block archive directory",
+        )
+        .unwrap();
+        assert!(store.vacuum().is_err());
+        assert!(store.artifacts.contains_key(&expired.id));
+        assert_eq!(store.root_hash(), original_hash);
+        assert_eq!(
+            fs::read(directory.0.join("journal.jsonl")).unwrap(),
+            original
+        );
+        assert!(store.healthy);
+        store.create("w", "items".into(), Map::new(), None).unwrap();
+        assert!(store.verify_ledger().unwrap().verified);
+    }
+
+    #[test]
+    fn merkle_v2_sequence_overflow_fails_without_writing() {
+        let directory = Directory::new();
+        let mut store = Store::open(&directory.0).unwrap();
+        let original = fs::read(directory.0.join("journal.jsonl")).unwrap();
+        store.last_seq = u64::MAX;
+        assert!(store.create("w", "items".into(), Map::new(), None).is_err());
+        assert_eq!(
+            fs::read(directory.0.join("journal.jsonl")).unwrap(),
+            original
+        );
+    }
+
+    #[test]
+    fn merkle_v2_external_checkpoint_rejects_rehashed_history() {
+        let directory = Directory::new();
+        let trusted = Directory::new();
+        let checkpoint = trusted.0.join("head.json");
+        let mut store = Store::open_with_checkpoint(&directory.0, Some(&checkpoint)).unwrap();
+        for i in 0..3 {
+            store
+                .create(
+                    "w",
+                    "items".into(),
+                    json!({"i":i}).as_object().unwrap().clone(),
+                    None,
+                )
+                .unwrap();
+        }
+        drop(store);
+        let path = directory.0.join("journal.jsonl");
+        let content = fs::read_to_string(&path).unwrap();
+        let mut entries: Vec<Entry> = content
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        entries[0].payload["artifact"]["data"]["i"] = json!(99);
+        let mut hash = GENESIS_HASH.to_string();
+        for entry in &mut entries {
+            entry.prev_hash = Some(hash.clone());
+            hash = compute_frame_hash(
+                entry.seq.unwrap(),
+                &hash,
+                &serde_json::to_vec(&entry.payload).unwrap(),
+            );
+            entry.hash = Some(hash.clone());
+        }
+        fs::write(
+            path,
+            entries
+                .iter()
+                .map(|entry| format!("{}\n", serde_json::to_string(entry).unwrap()))
+                .collect::<String>(),
+        )
+        .unwrap();
+        // The attacker rewrites the local head along with a self-consistent chain.
+        write_checkpoint(
+            &directory.0.join("ledger-head.json"),
+            &LedgerCheckpoint {
+                latest_seq: 3,
+                root_hash: hash,
+            },
+        )
+        .unwrap();
+        let err = Store::open_with_checkpoint(&directory.0, Some(&checkpoint))
+            .err()
+            .unwrap();
+        assert!(err.to_string().contains("checkpoint hash mismatch"));
+    }
+
+    #[test]
+    fn merkle_v2_checkpoint_failure_blocks_further_writes_until_recovery() {
+        let directory = Directory::new();
+        let trusted = Directory::new();
+        let checkpoint = trusted.0.join("head.json");
+        let mut store = Store::open_with_checkpoint(&directory.0, Some(&checkpoint)).unwrap();
+        store.create("w", "items".into(), Map::new(), None).unwrap();
+        let old_head = fs::read(&checkpoint).unwrap();
+        fs::remove_file(&checkpoint).unwrap();
+        fs::create_dir(&checkpoint).unwrap(); // inject a checkpoint publication failure
+        assert!(store.create("w", "items".into(), Map::new(), None).is_err());
+        assert!(!store.healthy);
+        assert_eq!(store.artifacts.len(), 1);
+        let committed = fs::read(directory.0.join("journal.jsonl")).unwrap();
+        assert!(store.create("w", "items".into(), Map::new(), None).is_err());
+        assert!(store.vacuum().is_err());
+        assert_eq!(
+            fs::read(directory.0.join("journal.jsonl")).unwrap(),
+            committed
+        );
+        drop(store);
+        fs::remove_dir(&checkpoint).unwrap();
+        fs::write(&checkpoint, old_head).unwrap();
+        let store = Store::open_with_checkpoint(&directory.0, Some(&checkpoint)).unwrap();
+        assert_eq!(store.artifacts.len(), 2); // a synced but unacknowledged write can recover
+        assert!(store.verify_ledger().unwrap().verified);
+    }
+
+    #[test]
+    fn merkle_v2_external_checkpoint_is_outside_data_and_exclusively_owned() {
+        let directory = Directory::new();
+        assert!(
+            Store::open_with_checkpoint(&directory.0, Some(&directory.0.join("head.json")))
+                .is_err()
+        );
+        let other = Directory::new();
+        let trusted = Directory::new();
+        let checkpoint = trusted.0.join("head.json");
+        let store = Store::open_with_checkpoint(&directory.0, Some(&checkpoint)).unwrap();
+        let err = Store::open_with_checkpoint(&other.0, Some(&checkpoint))
+            .err()
+            .unwrap();
+        assert!(
+            err.to_string()
+                .contains("another server owns this ledger checkpoint")
+        );
+        drop(store);
+        assert!(Store::open_with_checkpoint(&directory.0, Some(&checkpoint)).is_ok());
+    }
+
+    #[test]
+    fn merkle_v2_recovery_before_compaction_swap_ignores_staged_generation() {
+        let directory = Directory::new();
+        let mut store = Store::open(&directory.0).unwrap();
+        let record = store.create("w", "items".into(), Map::new(), None).unwrap();
+        let hash = store.root_hash().to_string();
+        drop(store);
+        let history = directory.0.join("journal-history");
+        secure_dir(&history).unwrap();
+        fs::copy(
+            directory.0.join("journal.jsonl"),
+            history.join(format!("{hash}.jsonl")),
+        )
+        .unwrap();
+        fs::write(
+            directory.0.join("journal.compact_interrupted"),
+            "incomplete staged snapshot",
+        )
+        .unwrap();
+        let mut store = Store::open(&directory.0).unwrap();
+        assert_eq!(store.last_seq(), 1);
+        assert_eq!(store.root_hash(), hash);
+        assert_eq!(store.get("w", &record.id).unwrap().id, record.id);
+        store.vacuum().unwrap();
+        assert!(store.verify_ledger().unwrap().verified);
+    }
+
+    #[test]
+    fn merkle_v2_full_backup_after_vacuum_restores_uploaded_blobs() {
+        let directory = Directory::new();
+        let mut store = Store::open(&directory.0).unwrap();
+        let bytes = b"retained blob";
+        let mut ticket = store.begin_upload().unwrap();
+        ticket.file.write_all(bytes).unwrap();
+        ticket.file.sync_all().unwrap();
+        let file = store
+            .finish_upload(
+                StoredFile {
+                    id: new_id("file"),
+                    artifact_id: String::new(),
+                    workspace_id: "w".into(),
+                    bucket: "documents".into(),
+                    filename: "test.txt".into(),
+                    sha256: hex(&Sha256::digest(bytes)),
+                    size: bytes.len() as u64,
+                    mime: "text/plain".into(),
+                    created_at: Utc::now().to_rfc3339(),
+                    created_by: "backend".into(),
+                    user_id: None,
+                },
+                &ticket,
+            )
+            .unwrap();
+        store.vacuum().unwrap();
+        let destination = directory.0.join("full-backup");
+        store.backup_full(&destination).unwrap();
+        let backup = Store::open(&destination).unwrap();
+        assert_eq!(backup.last_seq(), store.last_seq());
+        assert_eq!(backup.root_hash(), store.root_hash());
+        assert_eq!(backup.files("w", "documents")[0].id, file.id);
+        assert_eq!(fs::read(backup.blob_path(&file).unwrap()).unwrap(), bytes);
+        assert!(backup.verify_ledger().unwrap().verified);
+    }
+
 }
 
 pub fn hex(bytes: &[u8]) -> String {
@@ -430,6 +1077,9 @@ impl Drop for UploadTicket {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 enum Event {
+    SnapshotReset {
+        idempotency: BTreeMap<String, (String, String)>,
+    },
     Batch { events: Vec<Event> },
     Artifact {
         artifact: Artifact,
@@ -481,11 +1131,292 @@ enum Event {
     },
 }
 
-#[derive(Serialize, Deserialize)]
-struct Entry {
-    version: u32,
-    payload: Value,
-    sha256: String,
+pub const GENESIS_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Entry {
+    pub version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seq: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prev_hash: Option<String>,
+    pub payload: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hash: Option<String>,
+}
+
+pub fn compute_frame_hash(seq: u64, prev_hash: &str, payload_bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(seq.to_string().as_bytes());
+    hasher.update(b":");
+    hasher.update(prev_hash.as_bytes());
+    hasher.update(b":");
+    hasher.update(payload_bytes);
+    hex(&hasher.finalize())
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LedgerReport {
+    pub verified: bool,
+    pub total_frames: u64,
+    pub root_hash: String,
+    pub genesis_hash: String,
+    pub latest_seq: u64,
+    pub tampering_detected: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LedgerCheckpoint {
+    latest_seq: u64,
+    root_hash: String,
+}
+
+fn valid_hash(hash: &str) -> bool {
+    hash.len() == 64
+        && hash
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+fn read_checkpoint(path: &Path) -> io::Result<Option<LedgerCheckpoint>> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if !metadata.file_type().is_file() => {
+            return Err(io::Error::other("ledger checkpoint must be a regular file"));
+        }
+        Ok(_) => {}
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err),
+    }
+    match fs::read(path) {
+        Ok(bytes) => {
+            let head: LedgerCheckpoint =
+                serde_json::from_slice(&bytes).map_err(io::Error::other)?;
+            if !valid_hash(&head.root_hash) {
+                return Err(io::Error::other("invalid ledger checkpoint hash"));
+            }
+            Ok(Some(head))
+        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
+fn write_checkpoint(path: &Path, head: &LedgerCheckpoint) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let temporary = parent.join(new_id("ledger-head"));
+    let result = (|| {
+        let mut file = private_file(&temporary, true)?;
+        serde_json::to_writer(&mut file, head).map_err(io::Error::other)?;
+        file.write_all(b"\n")?;
+        file.sync_all()?;
+        fs::rename(&temporary, path)?;
+        sync_dir(parent)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(temporary);
+    }
+    result
+}
+
+// A compacted journal begins at a higher sequence and links to the archived
+// segment through its first frame's authenticated prev_hash. Resolve backwards
+// iteratively, then verify forwards; never trust archive filenames as evidence.
+fn journal_segments(root: &Path) -> io::Result<Vec<PathBuf>> {
+    let mut segments = vec![root.join("journal.jsonl")];
+    let mut previous_start = None;
+    loop {
+        let mut reader = BufReader::new(File::open(segments.last().unwrap())?);
+        let mut line = Vec::new();
+        reader.read_until(b'\n', &mut line)?;
+        if line.is_empty() || line.last() != Some(&b'\n') {
+            break;
+        }
+        let entry: Entry = serde_json::from_slice(&line).map_err(io::Error::other)?;
+        if entry.version != 2 {
+            break;
+        }
+        let seq = entry
+            .seq
+            .ok_or_else(|| io::Error::other("missing first-frame sequence"))?;
+        if previous_start.is_some_and(|previous| seq >= previous) {
+            return Err(io::Error::other("cyclic or non-decreasing journal archive"));
+        }
+        previous_start = Some(seq);
+        if seq <= 1 {
+            break;
+        }
+        let hash = entry
+            .prev_hash
+            .filter(|h| valid_hash(h))
+            .ok_or_else(|| io::Error::other("invalid archive hash"))?;
+        if !fs::symlink_metadata(root.join("journal-history"))?.file_type().is_dir() {
+            return Err(io::Error::other("journal history must be a regular directory"));
+        }
+        let path = root.join("journal-history").join(format!("{hash}.jsonl"));
+        if !fs::symlink_metadata(&path)?.file_type().is_file() {
+            return Err(io::Error::other("journal archive must be a regular file"));
+        }
+        segments.push(path);
+    }
+    segments.reverse();
+    Ok(segments)
+}
+
+fn scan_ledger(
+    root: &Path,
+    checkpoints: &[LedgerCheckpoint],
+    repair_tail: bool,
+) -> io::Result<LedgerReport> {
+    let mut report = LedgerReport {
+        verified: true,
+        total_frames: 0,
+        root_hash: GENESIS_HASH.into(),
+        genesis_hash: GENESIS_HASH.into(),
+        latest_seq: 0,
+        tampering_detected: false,
+        error: None,
+    };
+    let mut failure = |message: String| {
+        report.verified = false;
+        report.tampering_detected = true;
+        report.error = Some(message);
+        report.clone()
+    };
+    let segments = match journal_segments(root) {
+        Ok(paths) => paths,
+        Err(err) => return Ok(failure(format!("invalid journal history: {err}"))),
+    };
+    let mut seen_v2 = false;
+    let mut matched = vec![false; checkpoints.len()];
+    for (index, head) in checkpoints.iter().enumerate() {
+        if head.latest_seq == 0 {
+            if head.root_hash != GENESIS_HASH {
+                return Ok(failure("invalid genesis checkpoint".into()));
+            }
+            matched[index] = true;
+        }
+    }
+    let mut truncate_at = None;
+    for (segment_index, path) in segments.iter().enumerate() {
+        let mut reader = BufReader::new(File::open(path)?);
+        let mut offset = 0;
+        loop {
+            let mut line = Vec::new();
+            if reader.read_until(b'\n', &mut line)? == 0 {
+                break;
+            }
+            let error = if line.last() != Some(&b'\n') {
+                if repair_tail && segment_index + 1 == segments.len() {
+                    truncate_at = Some(offset);
+                    break;
+                }
+                Some("trailing uncommitted or incomplete frame".to_string())
+            } else {
+                None
+            };
+            if let Some(error) = error {
+                report.error = Some(error);
+                break;
+            }
+            let entry: Entry = match serde_json::from_slice(&line) {
+                Ok(entry) => entry,
+                Err(err) => {
+                    report.error = Some(format!("corrupt entry json: {err}"));
+                    break;
+                }
+            };
+            let payload = serde_json::to_vec(&entry.payload).map_err(io::Error::other)?;
+            let next = report
+                .latest_seq
+                .checked_add(1)
+                .ok_or_else(|| io::Error::other("ledger sequence exhausted"))?;
+            let hash = match entry.version {
+                1 if seen_v2 => {
+                    report.error = Some("legacy v1 frame after v2: downgrade rejected".into());
+                    break;
+                }
+                1 => {
+                    let hash = hex(&Sha256::digest(&payload));
+                    if entry.sha256.as_deref() != Some(&hash) {
+                        report.error =
+                            Some(format!("sha256 checksum failure at legacy frame {next}"));
+                        break;
+                    }
+                    hash
+                }
+                2 => {
+                    seen_v2 = true;
+                    if entry.seq != Some(next) {
+                        report.error = Some(format!(
+                            "sequence discontinuity: expected {next}, found {:?}",
+                            entry.seq
+                        ));
+                        break;
+                    }
+                    if entry.prev_hash.as_deref() != Some(&report.root_hash) {
+                        report.error = Some(format!("hash-chain break at seq {next}"));
+                        break;
+                    }
+                    let hash = compute_frame_hash(next, &report.root_hash, &payload);
+                    if entry.hash.as_deref() != Some(&hash) {
+                        report.error =
+                            Some(format!("cryptographic frame hash mismatch at seq {next}"));
+                        break;
+                    }
+                    hash
+                }
+                version => {
+                    report.error = Some(format!("unsupported version {version}"));
+                    break;
+                }
+            };
+            // Validate event shape during verification as well as replay.
+            if let Err(err) = serde_json::from_value::<Event>(entry.payload) {
+                report.error = Some(format!("invalid event at seq {next}: {err}"));
+                break;
+            }
+            report.latest_seq = next;
+            report.total_frames += 1;
+            report.root_hash = hash;
+            for (index, head) in checkpoints.iter().enumerate() {
+                if head.latest_seq == next {
+                    if head.root_hash != report.root_hash {
+                        report.error =
+                            Some(format!("ledger checkpoint hash mismatch at seq {next}"));
+                        break;
+                    }
+                    matched[index] = true;
+                }
+            }
+            if report.error.is_some() {
+                break;
+            }
+            offset += line.len() as u64;
+        }
+        if report.error.is_some() {
+            break;
+        }
+    }
+    if report.error.is_none() && matched.iter().any(|matched| !matched) {
+        report.error = Some("journal rollback: committed checkpoint is missing".into());
+    }
+    if report.error.is_some() {
+        report.verified = false;
+        report.tampering_detected = true;
+    } else if let Some(offset) = truncate_at {
+        let file = private_file(&root.join("journal.jsonl"), false)?;
+        file.set_len(offset)?;
+        file.sync_all()?;
+    }
+    Ok(report)
 }
 
 struct CachedVector {
@@ -505,6 +1436,8 @@ impl CachedVector {
 
 pub struct Store {
     root: PathBuf,
+    external_checkpoint: Option<PathBuf>,
+    _checkpoint_lock: Option<File>,
     _lock: File,
     journal: File,
     artifacts: BTreeMap<String, Arc<Artifact>>,
@@ -520,11 +1453,28 @@ pub struct Store {
     demo_event: Option<Value>,
     webhooks: BTreeMap<String, Webhook>,
     pub healthy: bool,
+    pub last_seq: u64,
+    pub last_hash: String,
 }
 
 impl Store {
     pub fn open(root: &Path) -> io::Result<Self> {
+        Self::open_with_checkpoint(root, None)
+    }
+
+    pub fn open_with_checkpoint(root: &Path, checkpoint: Option<&Path>) -> io::Result<Self> {
         secure_dir(root)?;
+        let external_checkpoint = checkpoint
+            .map(|path| {
+                let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+                let resolved_parent = parent.canonicalize()?;
+                if resolved_parent.starts_with(root.canonicalize()?) {
+                    return Err(io::Error::other("external ledger checkpoint must be outside the data directory"));
+                }
+                let filename = path.file_name().ok_or_else(|| io::Error::other("ledger checkpoint requires a filename"))?;
+                Ok(resolved_parent.join(filename))
+            })
+            .transpose()?;
         secure_dir(&root.join("artifacts"))?;
         let lock = private_file(&root.join("server.lock"), false)?;
         let mut locked = lock.try_lock();
@@ -538,6 +1488,16 @@ impl Store {
             }
         }
         locked.map_err(|_| io::Error::other("another server owns this data directory"))?;
+        let checkpoint_lock = external_checkpoint
+            .as_ref()
+            .map(|path| {
+                let mut name = path.file_name().unwrap().to_os_string();
+                name.push(".lock");
+                let file = private_file(&path.with_file_name(name), false)?;
+                file.try_lock().map_err(|_| io::Error::other("another server owns this ledger checkpoint"))?;
+                Ok::<File, io::Error>(file)
+            })
+            .transpose()?;
         secure_dir(&root.join("storage"))?;
         secure_dir(&root.join("uploads"))?;
         let journal = private_file(&root.join("journal.jsonl"), false)?;
@@ -549,6 +1509,8 @@ impl Store {
         sync_dir(root)?;
         let mut store = Self {
             root: root.to_path_buf(),
+            external_checkpoint,
+            _checkpoint_lock: checkpoint_lock,
             _lock: lock,
             journal,
             artifacts: BTreeMap::new(),
@@ -564,29 +1526,26 @@ impl Store {
             demo_event: None,
             webhooks: BTreeMap::new(),
             healthy: true,
+            last_seq: 0,
+            last_hash: GENESIS_HASH.to_string(),
         };
+        let report = scan_ledger(root, &store.checkpoints()?, true)?;
+        if !report.verified {
+            return Err(io::Error::other(report.error.unwrap_or_else(|| "invalid journal".into())));
+        }
         let mut reader = BufReader::new(store.journal.try_clone()?);
-        let mut offset = 0u64;
         loop {
             let mut line = Vec::new();
             if reader.read_until(b'\n', &mut line)? == 0 {
                 break;
             }
-            if line.last() != Some(&b'\n') {
-                // Only an incomplete final frame is discarded. Complete invalid frames fail closed.
-                store.journal.set_len(offset)?;
-                store.journal.sync_all()?;
-                break;
-            }
             let entry: Entry = serde_json::from_slice(&line).map_err(io::Error::other)?;
-            let payload = serde_json::to_vec(&entry.payload).map_err(io::Error::other)?;
-            if entry.version != 1 || hex(&Sha256::digest(&payload)) != entry.sha256 {
-                return Err(io::Error::other("unsupported or corrupt journal entry"));
-            }
             store.apply(serde_json::from_value(entry.payload).map_err(io::Error::other)?);
-            offset += line.len() as u64;
         }
+        store.last_seq = report.latest_seq;
+        store.last_hash = report.root_hash;
         store.journal.seek(SeekFrom::End(0))?;
+        store.persist_head()?;
         for artifact in store.artifacts.values() {
             store.project(artifact)?;
         }
@@ -666,6 +1625,20 @@ impl Store {
 
     fn apply(&mut self, event: Event) {
         match event {
+            Event::SnapshotReset { idempotency } => {
+                self.artifacts.clear();
+                self.collection_index.clear();
+                self.vector_index.clear();
+                self.conversations.clear();
+                self.idempotency = idempotency;
+                self.users.clear();
+                self.sessions.clear();
+                self.buckets.clear();
+                self.files.clear();
+                self.event_workers.clear();
+                self.demo_event = None;
+                self.webhooks.clear();
+            }
             Event::Batch { events } => {
                 for event in events { self.apply(event); }
             }
@@ -804,12 +1777,18 @@ impl Store {
         // Keep the canonical Value serialization used by replay, but reuse its
         // bytes in the frame instead of serializing the entire payload twice.
         let payload = serde_json::to_vec(&payload).map_err(io::Error::other)?;
-        let sha256 = hex(&Sha256::digest(&payload));
-        let mut frame = Vec::with_capacity(payload.len() + 104);
-        frame.extend_from_slice(b"{\"version\":1,\"payload\":");
+        let next_seq = self.last_seq.checked_add(1).ok_or_else(|| io::Error::other("ledger sequence exhausted"))?;
+        let prev_hash = self.last_hash.clone();
+        let hash = compute_frame_hash(next_seq, &prev_hash, &payload);
+        let mut frame = Vec::with_capacity(payload.len() + 180);
+        frame.extend_from_slice(b"{\"version\":2,\"seq\":");
+        frame.extend_from_slice(next_seq.to_string().as_bytes());
+        frame.extend_from_slice(b",\"prev_hash\":\"");
+        frame.extend_from_slice(prev_hash.as_bytes());
+        frame.extend_from_slice(b"\",\"payload\":");
         frame.extend_from_slice(&payload);
-        frame.extend_from_slice(b",\"sha256\":\"");
-        frame.extend_from_slice(sha256.as_bytes());
+        frame.extend_from_slice(b",\"hash\":\"");
+        frame.extend_from_slice(hash.as_bytes());
         frame.extend_from_slice(b"\"}\n");
         if self.journal.metadata()?.len() + frame.len() as u64 > MAX_JOURNAL_BYTES {
             return Err(io::Error::other(
@@ -821,6 +1800,12 @@ impl Store {
             .write_all(&frame)
             .and_then(|_| self.journal.sync_data())
         {
+            self.healthy = false;
+            return Err(error);
+        }
+        self.last_seq = next_seq;
+        self.last_hash = hash;
+        if let Err(error) = self.persist_head() {
             self.healthy = false;
             return Err(error);
         }
@@ -1628,9 +2613,30 @@ impl Store {
     }
 
     pub fn backup_full(&self, destination: &Path) -> io::Result<()> {
+        let report = self.verify_ledger()?;
+        if !report.verified {
+            return Err(io::Error::other(
+                report.error.unwrap_or_else(|| "invalid journal".into()),
+            ));
+        }
         fs::create_dir(destination)?;
         secure_dir(destination)?;
-        self.backup(&destination.join("journal.jsonl"))?;
+        for source in journal_segments(&self.root)? {
+            let target =
+                destination.join(source.strip_prefix(&self.root).map_err(io::Error::other)?);
+            secure_dir(target.parent().unwrap())?;
+            let mut file = private_file(&target, true)?;
+            io::copy(&mut File::open(source)?, &mut file)?;
+            file.sync_all()?;
+            sync_dir(target.parent().unwrap())?;
+        }
+        write_checkpoint(
+            &destination.join("ledger-head.json"),
+            &LedgerCheckpoint {
+                latest_seq: self.last_seq,
+                root_hash: self.last_hash.clone(),
+            },
+        )?;
         for file in self.files.values() {
             let source = self.blob_path(file)?;
             let target =
@@ -1651,9 +2657,31 @@ impl Store {
     }
 
     pub fn backup(&self, destination: &Path) -> io::Result<()> {
-        let mut source = File::open(self.root.join("journal.jsonl"))?;
+        let report = self.verify_ledger()?;
+        if !report.verified {
+            return Err(io::Error::other(
+                report.error.unwrap_or_else(|| "invalid journal".into()),
+            ));
+        }
+        let segments = journal_segments(&self.root)?;
+        let bytes = segments
+            .iter()
+            .try_fold(0u64, |total, path| -> io::Result<u64> {
+                total
+                    .checked_add(fs::metadata(path)?.len())
+                    .ok_or_else(|| io::Error::other("backup size overflow"))
+            })?;
+        if bytes > MAX_JOURNAL_BYTES {
+            return Err(io::Error::other(
+                "flattened journal backup exceeds 64 GiB; use --include-files to preserve segments",
+            ));
+        }
         let mut target = private_file(destination, true)?;
-        io::copy(&mut source, &mut target)?;
+        // Flatten segments into a standalone journal. SnapshotReset frames make
+        // replay discard old state while preserving the complete audit chain.
+        for path in segments {
+            io::copy(&mut File::open(path)?, &mut target)?;
+        }
         target.sync_all()?;
         if let Some(parent) = destination.parent().filter(|p| !p.as_os_str().is_empty()) {
             sync_dir(parent)?;
@@ -1662,134 +2690,266 @@ impl Store {
     }
 
     pub fn vacuum(&mut self) -> io::Result<VacuumStats> {
+        if !self.healthy {
+            return Err(io::Error::other(
+                "storage unavailable after write failure; restart for recovery",
+            ));
+        }
+        let report = self.verify_ledger()?;
+        if !report.verified {
+            return Err(io::Error::other(
+                report.error.unwrap_or_else(|| "invalid journal".into()),
+            ));
+        }
         let initial_bytes = self.journal.metadata()?.len();
-        let compact_path = self.root.join("journal.jsonl.compact");
-        let mut new_journal = private_file(&compact_path, true)?;
-        let mut purged_expired = 0;
-        let now_dt = Utc::now();
-        let now_str = now_dt.to_rfc3339();
-
-        // 1. Purge expired sessions
-        self.sessions.retain(|_, s| s.expires_at > now_dt.timestamp());
-
-        // 2. Purge expired artifacts
-        let expired_ids: Vec<String> = self
+        let now = Utc::now();
+        let expired_ids: BTreeSet<String> = self
             .artifacts
             .values()
-            .filter_map(|art| {
-                if let Some(exp) = art.data.get("expires_at").and_then(|v| v.as_str()) {
-                    if exp <= now_str.as_str() {
-                        return Some(art.id.clone());
-                    }
-                }
-                None
+            .filter_map(|artifact| {
+                artifact
+                    .data
+                    .get("expires_at")
+                    .and_then(Value::as_str)
+                    .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                    .filter(|expiry| *expiry <= now)
+                    .map(|_| artifact.id.clone())
             })
             .collect();
-        for id in expired_ids {
-            self.vector_index.remove(&id);
-            if let Some(old) = self.artifacts.remove(&id) {
-                if let Some(kinds) = self.collection_index.get_mut(&old.workspace_id) {
-                    if let Some(list) = kinds.get_mut(&old.kind) {
-                        list.retain(|a| a.id != id);
-                    }
-                }
-            }
-            purged_expired += 1;
-            let _ = fs::remove_file(self.root.join("artifacts").join(format!("{id}.toon")));
-        }
-
-        // 3. Write active users
-        for user in self.users.values() {
-            Self::write_entry(&mut new_journal, Event::UserCreated { user: user.clone() })?;
-        }
-
-        // 4. Write active sessions
-        for session in self.sessions.values() {
-            Self::write_entry(&mut new_journal, Event::SessionCreated { session: session.clone() })?;
-        }
-
-        // 5. Write active buckets
-        for bucket in self.buckets.values() {
-            Self::write_entry(&mut new_journal, Event::BucketCreated { bucket: bucket.clone() })?;
-        }
-
-        // 6. Write active non-file artifacts
-        let file_artifact_ids: BTreeSet<&str> = self.files.values().map(|f| f.artifact_id.as_str()).collect();
+        let idempotency = self
+            .idempotency
+            .iter()
+            .filter(|(_, (_, id))| self.artifacts.contains_key(id) && !expired_ids.contains(id))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        let mut events = vec![Event::SnapshotReset { idempotency }];
+        events.extend(
+            self.users
+                .values()
+                .map(|user| Event::UserCreated { user: user.clone() }),
+        );
+        events.extend(
+            self.sessions
+                .values()
+                .filter(|session| session.expires_at > now.timestamp())
+                .map(|session| Event::SessionCreated {
+                    session: session.clone(),
+                }),
+        );
+        events.extend(self.buckets.values().map(|bucket| Event::BucketCreated {
+            bucket: bucket.clone(),
+        }));
+        let file_artifact_ids: BTreeSet<&str> = self
+            .files
+            .values()
+            .map(|file| file.artifact_id.as_str())
+            .collect();
         for artifact in self.artifacts.values() {
-            if !file_artifact_ids.contains(artifact.id.as_str()) {
+            if !expired_ids.contains(&artifact.id)
+                && !file_artifact_ids.contains(artifact.id.as_str())
+            {
                 let fingerprint = hex(&Sha256::digest(
-                    serde_json::to_vec(&(&artifact.kind, &artifact.data)).unwrap_or_default(),
+                    serde_json::to_vec(&(&artifact.kind, &artifact.data))
+                        .map_err(io::Error::other)?,
                 ));
-                Self::write_entry(&mut new_journal, Event::Artifact {
+                events.push(Event::Artifact {
                     artifact: artifact.as_ref().clone(),
                     idempotency: None,
                     fingerprint,
-                })?;
+                });
             }
         }
-
-        // 7. Write active files + their file artifacts
         for file in self.files.values() {
-            if let Some(artifact) = self.artifacts.get(&file.artifact_id) {
-                Self::write_entry(&mut new_journal, Event::FileUploaded {
+            if let Some(artifact) = self
+                .artifacts
+                .get(&file.artifact_id)
+                .filter(|a| !expired_ids.contains(&a.id))
+            {
+                events.push(Event::FileUploaded {
                     file: file.clone(),
                     artifact: artifact.as_ref().clone(),
-                })?;
+                });
             }
         }
-
-        // 8. Write event workers & webhooks
-        for worker in self.event_workers.values() {
-            Self::write_entry(&mut new_journal, Event::WorkerCreated { worker: worker.clone() })?;
+        events.extend(
+            self.event_workers
+                .values()
+                .map(|worker| Event::WorkerCreated {
+                    worker: worker.clone(),
+                }),
+        );
+        if let Some(payload) = &self.demo_event {
+            events.push(Event::DemoSeeded {
+                payload: payload.clone(),
+            });
         }
-        if let Some(event) = &self.demo_event {
-            Self::write_entry(&mut new_journal, Event::DemoSeeded { payload: event.clone() })?;
-        }
-        for webhook in self.webhooks.values() {
-            Self::write_entry(&mut new_journal, Event::WebhookCreated { webhook: webhook.clone() })?;
-        }
+        events.extend(self.webhooks.values().map(|webhook| Event::WebhookCreated {
+            webhook: webhook.clone(),
+        }));
+        events.extend(
+            self.conversations
+                .values()
+                .map(|conversation| Event::Conversation {
+                    conversation: conversation.clone(),
+                }),
+        );
 
-        // 9. Write conversations
-        for conversation in self.conversations.values() {
-            Self::write_entry(&mut new_journal, Event::Conversation { conversation: conversation.clone() })?;
+        // Stage the snapshot without changing live state. The old head is the
+        // authenticated predecessor, and every snapshot frame consumes a new seq.
+        let compact_path = self.root.join(new_id("journal.compact"));
+        let mut cur_seq = self.last_seq;
+        let mut cur_hash = self.last_hash.clone();
+        let staged = (|| {
+            let mut file = private_file(&compact_path, true)?;
+            for event in &events {
+                cur_seq = cur_seq
+                    .checked_add(1)
+                    .ok_or_else(|| io::Error::other("ledger sequence exhausted"))?;
+                cur_hash = Self::write_entry_v2(&mut file, cur_seq, &cur_hash, event)?;
+            }
+            if file.metadata()?.len() > MAX_JOURNAL_BYTES {
+                return Err(io::Error::other("compacted journal exceeds storage limit"));
+            }
+            file.sync_all()?;
+            Ok(file.metadata()?.len())
+        })();
+        let compacted_bytes = match staged {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                let _ = fs::remove_file(&compact_path);
+                return Err(err);
+            }
+        };
+
+        // Publish a complete immutable archive before replacing the active file.
+        // A crash before the swap leaves an unused archive; after the swap the
+        // first snapshot frame resolves it by prev_hash. No multi-file manifest
+        // update is required for recovery.
+        if self.last_seq > 0 {
+            let history = self.root.join("journal-history");
+            let temporary = history.join(new_id("archive"));
+            let archive_result = (|| {
+                secure_dir(&history)?;
+                let mut file = private_file(&temporary, true)?;
+                io::copy(&mut File::open(self.root.join("journal.jsonl"))?, &mut file)?;
+                file.sync_all()?;
+                fs::rename(
+                    &temporary,
+                    history.join(format!("{}.jsonl", self.last_hash)),
+                )?;
+                sync_dir(&history)?;
+                sync_dir(&self.root)
+            })();
+            if let Err(err) = archive_result {
+                let _ = fs::remove_file(&temporary);
+                let _ = fs::remove_file(&compact_path);
+                return Err(err);
+            }
         }
-
-        new_journal.sync_all()?;
-        let compacted_bytes = new_journal.metadata()?.len();
-        drop(new_journal);
-
-        // Atomic swap
         let journal_path = self.root.join("journal.jsonl");
-        fs::rename(&compact_path, &journal_path)?;
+        if let Err(err) = fs::rename(&compact_path, &journal_path) {
+            let _ = fs::remove_file(&compact_path);
+            return Err(err);
+        }
+        // Fail closed after the swap until file handle, directory and checkpoints
+        // are durable. Recovery accepts the old checkpoint as a verified prefix.
+        self.healthy = false;
         sync_dir(&self.root)?;
-
         self.journal = private_file(&journal_path, false)?;
         self.journal.seek(SeekFrom::End(0))?;
-
+        self.last_seq = cur_seq;
+        self.last_hash = cur_hash;
+        self.persist_head()?;
+        for event in events {
+            self.apply(event);
+        }
+        self.healthy = true;
+        for id in &expired_ids {
+            let _ = fs::remove_file(self.root.join("artifacts").join(format!("{id}.toon")));
+        }
         Ok(VacuumStats {
             initial_bytes,
             compacted_bytes,
             active_artifacts: self.artifacts.len(),
             active_users: self.users.len(),
             active_files: self.files.len(),
-            purged_expired,
+            purged_expired: expired_ids.len(),
         })
     }
 
-    fn write_entry(file: &mut File, event: Event) -> io::Result<()> {
+    fn write_entry_v2(
+        file: &mut File,
+        seq: u64,
+        prev_hash: &str,
+        event: &Event,
+    ) -> io::Result<String> {
         let payload = serde_json::to_value(&event).map_err(io::Error::other)?;
-        let sha256 = hex(&Sha256::digest(
-            serde_json::to_vec(&payload).map_err(io::Error::other)?,
-        ));
-        let mut frame = serde_json::to_vec(&Entry {
-            version: 1,
-            payload,
-            sha256,
-        })
-        .map_err(io::Error::other)?;
-        frame.push(b'\n');
-        file.write_all(&frame)
+        let payload = serde_json::to_vec(&payload).map_err(io::Error::other)?;
+        let hash = compute_frame_hash(seq, prev_hash, &payload);
+        let mut frame = Vec::with_capacity(payload.len() + 180);
+        frame.extend_from_slice(b"{\"version\":2,\"seq\":");
+        frame.extend_from_slice(seq.to_string().as_bytes());
+        frame.extend_from_slice(b",\"prev_hash\":\"");
+        frame.extend_from_slice(prev_hash.as_bytes());
+        frame.extend_from_slice(b"\",\"payload\":");
+        frame.extend_from_slice(&payload);
+        frame.extend_from_slice(b",\"hash\":\"");
+        frame.extend_from_slice(hash.as_bytes());
+        frame.extend_from_slice(b"\"}\n");
+        file.write_all(&frame)?;
+        Ok(hash)
     }
+
+    pub fn last_seq(&self) -> u64 {
+        self.last_seq
+    }
+
+    pub fn root_hash(&self) -> &str {
+        &self.last_hash
+    }
+
+    fn checkpoints(&self) -> io::Result<Vec<LedgerCheckpoint>> {
+        let mut heads = Vec::new();
+        if let Some(head) = read_checkpoint(&self.root.join("ledger-head.json"))? {
+            heads.push(head);
+        }
+        if let Some(path) = &self.external_checkpoint {
+            if let Some(head) = read_checkpoint(path)? {
+                heads.push(head);
+            }
+        }
+        Ok(heads)
+    }
+
+    fn persist_head(&self) -> io::Result<()> {
+        let head = LedgerCheckpoint {
+            latest_seq: self.last_seq,
+            root_hash: self.last_hash.clone(),
+        };
+        write_checkpoint(&self.root.join("ledger-head.json"), &head)?;
+        if let Some(path) = &self.external_checkpoint {
+            write_checkpoint(path, &head)?;
+        }
+        Ok(())
+    }
+
+    pub fn verify_ledger(&self) -> io::Result<LedgerReport> {
+        let mut checkpoints = self.checkpoints()?;
+        checkpoints.push(LedgerCheckpoint {
+            latest_seq: self.last_seq,
+            root_hash: self.last_hash.clone(),
+        });
+        let mut report = scan_ledger(&self.root, &checkpoints, false)?;
+        if report.verified
+            && (report.latest_seq != self.last_seq || report.root_hash != self.last_hash)
+        {
+            report.verified = false;
+            report.tampering_detected = true;
+            report.error = Some("journal head differs from live committed head".into());
+        }
+        Ok(report)
+    }
+
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
