@@ -2758,23 +2758,34 @@ fn compile_manifest_value(
         let mo = t.data.get("model").and_then(Value::as_str).unwrap_or("");
         let summary = t.data.get("summary").and_then(Value::as_str).unwrap_or("");
         let created = t.data.get("created_at").and_then(Value::as_str).unwrap_or("");
+        let handoff_summary = t.data.get("handoff_summary").and_then(Value::as_str);
         if !summary.is_empty() {
-            turn_summaries.push(format!("- [{agent}] {summary}"));
+            let mut summary_entry = format!("- [{agent}] {summary}");
+            if let Some(hs) = handoff_summary {
+                if !hs.trim().is_empty() && hs != summary {
+                    summary_entry.push_str(&format!("\n  Findings / Assessment:\n  {}", hs.trim()));
+                }
+            }
+            turn_summaries.push(summary_entry);
         }
-        recent_turns.push(json!({
+        let mut turn_obj = json!({
             "agent": agent,
             "model": mo,
             "summary": summary,
             "files_touched": turn_files,
-            "created_at": created
-        }));
+            "created_at": created,
+        });
+        if let Some(hs) = handoff_summary {
+            turn_obj["handoff_summary"] = json!(hs);
+        }
+        recent_turns.push(turn_obj);
     }
 
     let mut dead_end_summaries = Vec::new();
     let mut known_dead_ends = Vec::new();
     for d in dead_ends {
-        let hyp = d.data.get("hypothesis").and_then(Value::as_str).unwrap_or("");
-        let reason = d.data.get("reason").and_then(Value::as_str).unwrap_or("");
+        let hyp = d.data.get("hypothesis").or_else(|| d.data.get("issue")).and_then(Value::as_str).unwrap_or("");
+        let reason = d.data.get("reason").or_else(|| d.data.get("why")).and_then(Value::as_str).unwrap_or("");
         let agent = d.data.get("agent").and_then(Value::as_str).unwrap_or("agent");
         if !hyp.is_empty() {
             dead_end_summaries.push(format!("- [{agent}] Hypothesis: \"{hyp}\" -> Failed: {reason}"));
@@ -2951,6 +2962,8 @@ struct AppendTurnBody {
     #[serde(default)]
     summary: Option<String>,
     #[serde(default)]
+    handoff_summary: Option<String>,
+    #[serde(default)]
     files_touched: Vec<String>,
     #[serde(default)]
     tokens: Option<Map<String, Value>>,
@@ -2982,6 +2995,9 @@ async fn append_session_turn(
     turn_data.insert("agent".into(), Value::String(body.agent));
     turn_data.insert("model".into(), Value::String(body.model));
     turn_data.insert("summary".into(), Value::String(body.summary.unwrap_or_default()));
+    if let Some(hs) = body.handoff_summary {
+        turn_data.insert("handoff_summary".into(), Value::String(hs));
+    }
     turn_data.insert("files_touched".into(), json!(body.files_touched));
     turn_data.insert("tokens".into(), json!(body.tokens));
     turn_data.insert("cost_usd".into(), json!(body.cost_usd.unwrap_or(0.0)));
