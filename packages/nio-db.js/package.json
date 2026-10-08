@@ -1,9 +1,9 @@
 {
   "name": "@nio-labs/nio-db.js",
-  "version": "1.0.4",
-  "description": "Ultra-lightweight JavaScript and TypeScript client for NioDB — the Agentic Database.",
+  "version": "1.0.5",
+  "description": "Ultra-lightweight JavaScript and TypeScript client for NioDB \u2014 the Agentic Database.",
   "main": "index.js",
-  "module": "index.js",
+  "module": "index.mjs",
   "types": "index.d.ts",
   "keywords": [
     "niodb",
@@ -21,5 +21,26 @@
   },
   "engines": {
     "node": ">=18"
-  }
+  },
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.mjs",
+      "require": "./index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "node build-esm.cjs",
+    "test": "node --test test/*.test.cjs",
+    "prepack": "npm run build"
+  },
+  "files": [
+    "index.js",
+    "index.mjs",
+    "index.d.ts",
+    "build-esm.cjs",
+    "README.md",
+    "LICENSE"
+  ]
 }

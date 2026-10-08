@@ -25,6 +25,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 mod accounts;
+mod persistence;
+pub use persistence::resume_deletion_jobs;
 mod demo;
 mod events;
 pub use demo::{dispatch_demo_event, seed_default_demo};
@@ -99,6 +101,12 @@ pub fn router(app: App) -> Router {
         .route("/api/v1/status", get(status))
         .route("/api/v1/records", get(list_records).post(create_record))
         .route("/api/v1/records/watch", get(watch_records))
+        .route("/api/v1/persistence/status", get(persistence::persistence_status))
+        .route("/api/v1/deletion-jobs", post(persistence::start_deletion_job))
+        .route("/api/v1/deletion-jobs/:id", get(persistence::deletion_job_status))
+        .route("/api/v1/mutations", post(persistence::mutate).layer(DefaultBodyLimit::max(8 * 1024 * 1024)))
+        .route("/api/v1/leases", get(persistence::lease_status).post(persistence::lease))
+        .route("/api/v1/collections/:collection/constraints", get(persistence::constraints).put(persistence::configure))
         .route("/api/v1/records/bulk", post(bulk_records_handler))
         .route("/api/v1/records/batch", post(bulk_records_handler))
         .route(
@@ -376,7 +384,9 @@ async fn storage<T: Send + 'static>(
             "Database operation failed",
         )
     })?;
-    result.map_err(|err| match err.kind() {
+    result.map_err(|err| {
+        if let Some((status, code, message)) = persistence::storage_error(&err) { return error(id, status, code, message); }
+        match err.kind() {
         std::io::ErrorKind::AlreadyExists => error(
             id,
             StatusCode::CONFLICT,
@@ -398,6 +408,7 @@ async fn storage<T: Send + 'static>(
             "database_unavailable",
             "Database operation failed",
         ),
+        }
     })
 }
 
@@ -462,7 +473,10 @@ async fn sql_query(
     let ws = body.workspace_id;
     let (native_res, fallback_records) = {
         let store = app.store.lock().unwrap();
-        let refs = store.visible_refs(&ws, collection_filter.as_deref(), user_id.as_deref());
+        let equalities = crate::query::required_equalities(&sql, &parameters);
+        let indexed = collection_filter.as_deref().and_then(|collection|
+            store.indexed_visible_refs(&ws, collection, &equalities, user_id.as_deref()));
+        let refs = indexed.unwrap_or_else(|| store.visible_refs(&ws, collection_filter.as_deref(), user_id.as_deref()));
         match crate::query::execute_native_sql_refs(&sql, &parameters, &refs, false) {
             Ok(result) => (Ok(result), None),
             Err(crate::query::NativeSqlError::QueryRejected) => (Err(true), None),
@@ -1062,14 +1076,16 @@ async fn bulk_records_handler(
                 if !store.healthy {
                     return Err(error(&id, StatusCode::SERVICE_UNAVAILABLE, "database_unavailable", "Database unhealthy"));
                 }
-                store.bulk_insert(&workspace, None, insert_items).map_err(|err| match err.kind() {
+                store.bulk_insert(&workspace, None, insert_items).map_err(|err| {
+                    if let Some((status, code, message)) = persistence::storage_error(&err) { return error(&id, status, code, message); }
+                    match err.kind() {
                     std::io::ErrorKind::AlreadyExists => error(&id, StatusCode::CONFLICT, "idempotency_conflict", "Idempotency key was reused with different data"),
                     std::io::ErrorKind::InvalidInput if matches!(err.to_string().as_str(), "invalid collection name" | "TTL is out of range") => error(
                         &id, StatusCode::BAD_REQUEST, "invalid_record", if err.to_string() == "invalid collection name" { "Invalid collection name" } else { "TTL is out of range" },
                     ),
                     std::io::ErrorKind::InvalidInput => error(&id, StatusCode::PAYLOAD_TOO_LARGE, "record_too_large", "Record data exceeds 16 MiB"),
                     _ => error(&id, StatusCode::SERVICE_UNAVAILABLE, "database_unavailable", "Database operation failed"),
-                })?
+                }})?
             };
             for art in res {
                 let mut m = Map::with_capacity(6);
@@ -3398,6 +3414,60 @@ mod tests {
         assert!(simple_recent_plan("Show recent records where status is failed", &schema).is_none());
         assert!(simple_recent_plan("Show the 5 most recent missing_collection records", &schema).is_none());
         assert!(simple_recent_plan("Show recent telemetry and customer records", &schema).is_none());
+    }
+
+    #[tokio::test]
+    async fn persistence_api_enforces_constraints_fences_and_bound_message_pages() {
+        let directory = Directory::new();
+        let state = app(&directory, Duration::from_secs(2));
+        let api = router(state.clone());
+        let mut notifications = state.events.subscribe();
+        let policy = json!({"unique":["appId"]});
+        let path = "/api/v1/collections/nioguru_messages/constraints";
+        assert_eq!(request(&api, "PUT", path, None, policy.clone(), None).await.0, StatusCode::UNAUTHORIZED);
+        let guarded = json!({"unique":["appId"],"lease":{"field":"conversationId","prefix":"conversation:"}});
+        assert_eq!(request(&api, "PUT", path, Some("alice"), guarded.clone(), None).await.0, StatusCode::OK);
+        assert_eq!(request(&api, "PUT", path, Some("alice"), guarded, None).await.0, StatusCode::OK);
+        assert_eq!(request(&api, "PUT", path, Some("alice"), policy, None).await.0, StatusCode::CONFLICT);
+        let (status, lease) = request(&api, "POST", "/api/v1/leases", Some("alice"), json!({"action":"acquire","resource":"conversation:c","owner":"run","ttl_ms":300000}), None).await;
+        assert_eq!(status, StatusCode::OK);
+        let proof = json!({"resource":"conversation:c","owner":"run","fence":lease["lease"]["fence"]});
+        let operations: Vec<Value> = (0..35).map(|i| json!({"action":"create","collection":"nioguru_messages","data":{"appId":format!("m{i:02}"),"conversationId":"c","createdAt":1000,"toolCalls":[],"attachments":[],"content":"hello"}})).collect();
+        let transaction = json!({"idempotency_key":"turn","operations":operations,"leases":[proof.clone()]});
+        let (status, first) = request(&api, "POST", "/api/v1/mutations", Some("alice"), transaction.clone(), None).await;
+        assert_eq!(status, StatusCode::OK, "{first}");
+        let (status, retry) = request(&api, "POST", "/api/v1/mutations", Some("alice"), transaction, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(first, retry);
+        for _ in 0..35 { assert_eq!(notifications.try_recv().unwrap()["name"], "record:create"); }
+        assert!(notifications.try_recv().is_err());
+        let (status, page) = request(&api, "POST", "/api/v1/query", Some("alice"), json!({"sql":"SELECT appId, createdAt, toolCalls, attachments FROM nioguru_messages WHERE conversationId = $1 ORDER BY createdAt DESC, appId DESC LIMIT 31", "parameters":["c"]}), None).await;
+        assert_eq!(status, StatusCode::OK, "{page}");
+        assert_eq!(page["engine"], "native");
+        assert_eq!(page["items"].as_array().unwrap().len(), 31);
+        assert_eq!(page["items"][0]["appId"], "m34");
+        assert_eq!(page["items"][29]["appId"], "m05");
+        assert_eq!(page["items"][0]["attachments"], json!([]));
+        let (status, older) = request(&api, "POST", "/api/v1/query", Some("alice"), json!({"sql":"SELECT appId, createdAt FROM nioguru_messages WHERE conversationId = $1 AND ((createdAt < $2) OR (createdAt = $2 AND appId < $3)) ORDER BY createdAt DESC, appId DESC LIMIT 31", "parameters":["c",1000,"m05"]}), None).await;
+        assert_eq!(status, StatusCode::OK, "{older}");
+        assert_eq!(older["engine"], "native");
+        assert_eq!(older["items"].as_array().unwrap().len(), 5);
+        assert_eq!(older["items"][0]["appId"], "m04");
+        let (status, injected) = request(&api, "POST", "/api/v1/query", Some("alice"), json!({"sql":"SELECT appId FROM nioguru_messages WHERE conversationId = $1 LIMIT 31", "parameters":["c' OR 1=1 --"]}), None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(injected["items"].as_array().unwrap().is_empty());
+        let record_id = first["records"][0]["id"].as_str().unwrap();
+        let update = json!({"idempotency_key":"edit","operations":[{"action":"update","id":record_id,"expected_revision":1,"data":{"content":"edited"}}],"leases":[proof.clone()]});
+        assert_eq!(request(&api, "POST", "/api/v1/mutations", Some("alice"), update, None).await.0, StatusCode::OK);
+        let stale = json!({"idempotency_key":"stale","operations":[{"action":"update","id":record_id,"expected_revision":1,"data":{"content":"stale"}}],"leases":[proof.clone()]});
+        let (status, error) = request(&api, "POST", "/api/v1/mutations", Some("alice"), stale, None).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(error["error"]["code"], "revision_conflict");
+        let (status, error) = request(&api, "PATCH", &format!("/api/v1/records/{record_id}"), Some("alice"), json!({"data":{"content":"bypass"}}), None).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(error["error"]["code"], "lease_required");
+        let mut release = proof; release["action"] = json!("release");
+        assert_eq!(request(&api, "POST", "/api/v1/leases", Some("alice"), release, None).await.0, StatusCode::OK);
     }
 
     fn app(directory: &Directory, timeout: Duration) -> App {

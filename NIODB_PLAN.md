@@ -86,3 +86,27 @@ Buckets are server-scoped. Raw and single-file multipart uploads stream through 
 Authenticated callers publish object data under an event `name`. Subscribers use an authenticated SSE stream, optionally filtered by `name`, and receive live messages or gap notices; events are not journaled or replayed. `channel` is reserved for future rooms. Registrations for up to 32 TypeScript workers and 32 webhooks are journaled and managed only by backend credentials, using `event_name` or `*`. Workers are trusted administrator code executed asynchronously in a bounded Node 22+ subprocess. Webhooks sign delivery bodies with a generated secret and retry three times while the server runs. Publishing acknowledges dispatch, not completion. A durable delivery queue, worker isolation from host privileges and event ACLs remain future work.
 
 Current limits and examples are in README. These changes were compiled. Integration tests have not been run for this task.
+
+
+## NioGuru persistence foundation (2026-10-08)
+
+Implemented in source; release publication and NioJS integration are pending.
+
+- Durable collection policies for unique application keys and required references.
+- Additive bounded `/api/v1/mutations`, expected revisions, and durable retry receipts.
+- Shared resource leases with monotonic fences and enforced record write guards.
+- JavaScript bound queries, policy/mutation/lease methods, cancellation/deadlines,
+  response bounds, and native ESM packaging alongside CommonJS.
+- Recovery, vacuum, concurrent identity, API cursor, and SDK compatibility coverage.
+
+See [application storage contracts](docs/APPLICATION_STORAGE.md) for exact APIs,
+limits, errors, and recovery behavior. Run `cargo test --lib` and `npm run check:sdk`.
+For a real server/SDK smoke test, build `niodb` and set `NIODB_TEST_BINARY` to its path
+when running `npm run check:persistence` (POSIX host). It uses isolated temporary data,
+no native Nio or AlaSQL execution, and verifies native queries plus a server restart.
+
+Follow-up work now includes restartable large cascade jobs, rebuildable equality
+indexes, configurable receipt retention, and active lease capacity. `cargo test
+--lib`, the explicit message-page benchmark, and the real server/SDK smoke test
+verify this server behavior. NioJS runtime compatibility and application cutover
+remain separate release gates.

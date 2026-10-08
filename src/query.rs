@@ -903,6 +903,29 @@ pub fn execute_native_sql(
 static PARSED_SQL_CACHE: std::sync::LazyLock<std::sync::RwLock<std::collections::HashMap<String, Result<ParsedSql, NativeSqlError>>>> =
     std::sync::LazyLock::new(|| std::sync::RwLock::new(std::collections::HashMap::new()));
 
+/// Equalities that every row satisfying the WHERE clause must satisfy.
+/// Unknown expressions return no hint; the SQL evaluator still checks every candidate.
+pub fn required_equalities(sql: &str, parameters: &[Value]) -> Vec<(String, Value)> {
+    fn required(expr: &SqlExpr) -> Vec<(String, Value)> {
+        match expr {
+            SqlExpr::Binary { left, op: BinaryOp::Eq, right } => match (left.as_ref(), right.as_ref()) {
+                (SqlExpr::Field(field), SqlExpr::Literal(value)) | (SqlExpr::Literal(value), SqlExpr::Field(field)) => vec![(field.clone(), value.clone())],
+                _ => Vec::new(),
+            },
+            SqlExpr::Binary { left, op: BinaryOp::And, right } => {
+                let mut values = required(left); values.extend(required(right)); values
+            }
+            SqlExpr::Binary { left, op: BinaryOp::Or, right } => {
+                let right_values = required(right);
+                required(left).into_iter().filter(|item| right_values.contains(item)).collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+    get_parsed_query(sql, parameters).ok()
+        .and_then(|parsed| parsed.where_expr.as_ref().map(required)).unwrap_or_default()
+}
+
 fn get_parsed_query(sql: &str, parameters: &[Value]) -> Result<ParsedSql, NativeSqlError> {
     if parameters.is_empty() {
         if let Ok(cache) = PARSED_SQL_CACHE.read() {
@@ -1654,5 +1677,21 @@ while True:
         // 4. Aliased where and order
         let res4 = execute_native_sql("SELECT c.name, c.city FROM public.customers AS c WHERE c.name = 'Ada' ORDER BY c.city DESC", &[], &records, false).unwrap();
         assert_eq!(res4["items"], json!([{"name": "Ada", "city": "London"}]));
+    }
+}
+
+#[cfg(test)]
+mod index_hint_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn required_equalities_respect_or_and_bound_values() {
+        let sql = "SELECT appId FROM messages WHERE conversationId = $1 AND ((createdAt < $2) OR (createdAt = $2 AND appId < $3)) ORDER BY createdAt DESC, appId DESC LIMIT 31";
+        assert_eq!(required_equalities(sql, &[json!("c"), json!(1000), json!("m30")]), vec![("conversationId".into(), json!("c"))]);
+        let sql = "SELECT appId FROM messages WHERE conversationId = $1 OR conversationId = $2";
+        assert!(required_equalities(sql, &[json!("c"), json!("other")]).is_empty());
+        assert_eq!(required_equalities(sql, &[json!("c"), json!("c")]), vec![("conversationId".into(), json!("c"))]);
+        assert_eq!(required_equalities("SELECT appId FROM messages WHERE conversationId = $1", &[json!("c' OR 1=1 --")]), vec![("conversationId".into(), json!("c' OR 1=1 --"))]);
     }
 }

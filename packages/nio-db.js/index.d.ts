@@ -1,15 +1,35 @@
+export interface RequestOptions { timeoutMs?: number; signal?: AbortSignal; }
+export interface CollectionConstraints {
+  unique?: string[];
+  references?: Array<{ field: string; collection: string; target_field: string }>;
+  lease?: { field: string; prefix: string } | null;
+}
+export interface LeaseProof { resource: string; owner: string; fence: number; }
+export interface Lease extends LeaseProof { expires_at: number; }
+export type Mutation =
+  | { action: "create"; collection: string; data: Record<string, unknown> }
+  | { action: "update"; id: string; data: Record<string, unknown>; expected_revision: number }
+  | { action: "delete"; id: string; expected_revision: number };
+export interface MutationRequest { idempotency_key: string; operations: Mutation[]; leases?: LeaseProof[]; }
+export interface MutationRecord { id: string; workspace_id: string; kind: string; data: Record<string, unknown>; revision: number; created_at: string; updated_at: string; }
+export interface MutationResult { records: MutationRecord[]; deleted: string[]; }
+export interface DeletionJobStatus { id: string; root_id: string; status: "pending" | "complete"; deleted: number; total: number; created_at_ms: number; }
+
 export interface NioDBOptions {
   url?: string;
   token?: string | null;
   workspaceId?: string | null;
+  timeoutMs?: number;
+  maxResponseBytes?: number;
+  fetch?: typeof fetch;
 }
 
-export interface InsertOptions {
+export interface InsertOptions extends RequestOptions {
   ttl?: number;
   idempotencyKey?: string;
 }
 
-export interface FindOptions {
+export interface FindOptions extends RequestOptions {
   limit?: number;
   cursor?: string;
 }
@@ -83,9 +103,9 @@ export interface VacuumStats {
 export interface CollectionClient {
   insert(data: Record<string, any>, options?: InsertOptions): Promise<any>;
   find(options?: FindOptions): Promise<{ items: any[]; next_cursor?: string }>;
-  get(id: string): Promise<any>;
+  get(id: string, options?: RequestOptions): Promise<any>;
   update(id: string, data: Record<string, any>, options?: any): Promise<any>;
-  delete(id: string): Promise<{ success: boolean; deleted: boolean; id: string }>;
+  delete(id: string, options?: RequestOptions): Promise<{ success: boolean; deleted: boolean; id: string }>;
   insertMany(records: Array<Record<string, any>>, options?: any): Promise<{ success: boolean; inserted: number; records: any[] }>;
   bulkInsert(records: Array<Record<string, any>>, options?: any): Promise<{ success: boolean; inserted: number; records: any[] }>;
   updateMany(records: Array<{ id: string; data?: Record<string, any>; [key: string]: any }>, options?: any): Promise<{ success: boolean; updated: number; records: any[] }>;
@@ -272,7 +292,17 @@ export interface SessionsClient {
 export class NioDB {
   constructor(options?: NioDBOptions);
   collection(name: string): CollectionClient;
-  query(sql: string): Promise<{ items: any[]; metrics?: any }>;
+  query(sql: string, parameters?: unknown[], options?: RequestOptions): Promise<{ items: any[]; metrics?: any; engine?: string }>;
+  configureCollection(collection: string, constraints: CollectionConstraints, options?: RequestOptions): Promise<{ constraints: CollectionConstraints }>;
+  getCollectionConstraints(collection: string, options?: RequestOptions): Promise<{ constraints: CollectionConstraints | null }>;
+  mutate(request: MutationRequest, options?: RequestOptions): Promise<MutationResult>;
+  getPersistenceStatus(options?: RequestOptions): Promise<{ active_receipts: number; receipt_limit: number; receipt_retention_days: number; spent_keys: number; active_leases: number; active_lease_limit: number; pending_deletion_jobs: number; indexed_keys: number }>;
+  startDeletionJob(rootId: string, idempotencyKey: string, options?: RequestOptions): Promise<{ job: DeletionJobStatus }>;
+  getDeletionJob(id: string, options?: RequestOptions): Promise<{ job: DeletionJobStatus }>;
+  getLease(resource: string, options?: RequestOptions): Promise<{ lease: Lease | null; active: boolean }>;
+  acquireLease(resource: string, owner: string, ttlMs?: number, options?: RequestOptions): Promise<{ lease: Lease }>;
+  renewLease(proof: LeaseProof, ttlMs?: number, options?: RequestOptions): Promise<{ lease: Lease }>;
+  releaseLease(proof: LeaseProof, options?: RequestOptions): Promise<{ lease: Lease }>;
   vacuum(): Promise<{ success: boolean; stats: VacuumStats }>;
   getTools(): Promise<{ tools: any[] }>;
   bulk(operations: any): Promise<any>;

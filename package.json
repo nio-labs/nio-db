@@ -1,6 +1,6 @@
 {
   "name": "@nio-labs/nio-db",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "NioDB \u2014 The Agentic DB that works. A lightweight database with natural-language queries, powered by Nio.",
   "license": "MIT",
   "bin": {
@@ -12,7 +12,8 @@
     "runtime/",
     "openapi.yaml",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "docs/APPLICATION_STORAGE.md"
   ],
   "engines": {
     "node": ">=18"
@@ -23,7 +24,7 @@
     "package:platform": "node scripts/package-platform.cjs",
     "check:launcher": "node --test scripts/launcher.test.cjs",
     "check:sql": "node --test scripts/sql.test.cjs",
-    "check:sdk": "node --test scripts/sdk.test.cjs",
+    "check:sdk": "node --test scripts/sdk.test.cjs packages/nio-db.js/test/*.test.cjs",
     "check:py": "python3 -m unittest discover -s packages/nio-db-py/tests",
     "test": "npm run check:launcher && npm run check:sql && npm run check:sdk",
     "benchmark": "node scripts/simulate-and-benchmark.cjs",
@@ -31,19 +32,19 @@
     "benchmark:compare": "node scripts/compare-sqlite.cjs",
     "seed:extras": "node scripts/seed-events-users.cjs",
     "seed:handlers": "node scripts/seed-event-handlers.cjs",
-    "publish:all": "node scripts/publish-all.cjs"
+    "publish:all": "node scripts/publish-all.cjs",
+    "check:persistence": "node --test scripts/persistence.integration.test.cjs"
   },
   "dependencies": {
     "alasql": "^4.0.0",
     "@nio-labs/nio-ai": "0.3.3"
   },
   "optionalDependencies": {
-    "@nio-labs/nio-db-darwin-arm64": "1.0.2",
-    "@nio-labs/nio-db-darwin-x64": "1.0.2",
-    "@nio-labs/nio-db-linux-arm64": "1.0.2",
-    "@nio-labs/nio-db-linux-x64": "1.0.2",
-    "@nio-labs/nio-db-win32-arm64": "1.0.2",
-    "@nio-labs/nio-db-win32-x64": "1.0.2"
+    "@nio-labs/nio-db-darwin-arm64": "1.0.5",
+    "@nio-labs/nio-db-darwin-x64": "1.0.5",
+    "@nio-labs/nio-db-linux-arm64": "1.0.5",
+    "@nio-labs/nio-db-linux-x64": "1.0.5",
+    "@nio-labs/nio-db-win32-x64": "1.0.5"
   },
   "publishConfig": {
     "access": "public"

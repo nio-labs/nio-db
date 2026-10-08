@@ -11,6 +11,12 @@ use std::{
     sync::Arc,
 };
 
+mod mutations;
+mod indexes;
+mod deletion_jobs;
+pub use deletion_jobs::DeletionJobStatus;
+pub use mutations::{CollectionConstraints, Lease, LeaseProof, LeasePolicy, ReferenceConstraint, Mutation, MutationRequest, MutationResult};
+
 pub const MAX_JOURNAL_BYTES: u64 = 64 * 1024 * 1024 * 1024;
 pub const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
 
@@ -1081,6 +1087,14 @@ enum Event {
         idempotency: BTreeMap<String, (String, String)>,
     },
     Batch { events: Vec<Event> },
+    CollectionConfigured { workspace: String, collection: String, constraints: CollectionConstraints },
+    MutationCommitted { key: String, receipt: mutations::MutationReceipt, events: Vec<Event>, proofs: Vec<LeaseProof> },
+    MutationReceipt { key: String, receipt: mutations::MutationReceipt },
+    MutationKeysExpired { keys: Vec<String> },
+    LeaseRemoved { key: String },
+    DeletionJobStarted { job: deletion_jobs::DeletionJob },
+    DeletionJobProgress { job_id: String, ids: Vec<String>, completed: bool },
+    LeaseChanged { key: String, lease: Lease },
     Artifact {
         artifact: Artifact,
         idempotency: Option<String>,
@@ -1442,9 +1456,20 @@ pub struct Store {
     journal: File,
     artifacts: BTreeMap<String, Arc<Artifact>>,
     collection_index: HashMap<String, HashMap<String, Vec<Arc<Artifact>>>>,
+    field_index: HashMap<(String, String, String, String), BTreeSet<String>>,
+    deletion_jobs: BTreeMap<String, deletion_jobs::DeletionJob>,
+    blocked_records: BTreeSet<String>,
+    blocked_resources: BTreeSet<String>,
     vector_index: HashMap<String, CachedVector>,
     conversations: BTreeMap<String, Conversation>,
     idempotency: BTreeMap<String, (String, String)>,
+    constraints: BTreeMap<String, CollectionConstraints>,
+    mutation_receipts: BTreeMap<String, mutations::MutationReceipt>,
+    spent_mutation_keys: BTreeSet<String>,
+    receipt_limit: usize,
+    receipt_retention_ms: i64,
+    active_lease_limit: usize,
+    leases: BTreeMap<String, Lease>,
     users: BTreeMap<String, UserRecord>,
     sessions: BTreeMap<String, UserSession>,
     buckets: BTreeMap<(String, String), Bucket>,
@@ -1507,6 +1532,17 @@ impl Store {
             ));
         }
         sync_dir(root)?;
+        let configured_limit = |name: &str, default: usize, max: usize| -> io::Result<usize> {
+            match std::env::var(name) {
+                Ok(raw) => raw.parse::<usize>().ok().filter(|n| (1..=max).contains(n))
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, format!("invalid {name}"))),
+                Err(std::env::VarError::NotPresent) => Ok(default),
+                Err(_) => Err(io::Error::new(io::ErrorKind::InvalidInput, format!("invalid {name}"))),
+            }
+        };
+        let receipt_limit = configured_limit("NIODB_RECEIPT_LIMIT", 100_000, 1_000_000)?;
+        let retention_days = configured_limit("NIODB_RECEIPT_RETENTION_DAYS", 30, 365)?;
+        let active_lease_limit = configured_limit("NIODB_ACTIVE_LEASE_LIMIT", 100_000, 1_000_000)?;
         let mut store = Self {
             root: root.to_path_buf(),
             external_checkpoint,
@@ -1515,9 +1551,20 @@ impl Store {
             journal,
             artifacts: BTreeMap::new(),
             collection_index: HashMap::new(),
+            field_index: HashMap::new(),
+            deletion_jobs: BTreeMap::new(),
+            blocked_records: BTreeSet::new(),
+            blocked_resources: BTreeSet::new(),
             vector_index: HashMap::new(),
             conversations: BTreeMap::new(),
             idempotency: BTreeMap::new(),
+            constraints: BTreeMap::new(),
+            mutation_receipts: BTreeMap::new(),
+            spent_mutation_keys: BTreeSet::new(),
+            receipt_limit,
+            receipt_retention_ms: retention_days as i64 * 86_400_000,
+            active_lease_limit,
+            leases: BTreeMap::new(),
             users: BTreeMap::new(),
             sessions: BTreeMap::new(),
             buckets: BTreeMap::new(),
@@ -1628,9 +1675,17 @@ impl Store {
             Event::SnapshotReset { idempotency } => {
                 self.artifacts.clear();
                 self.collection_index.clear();
+                self.field_index.clear();
+                self.deletion_jobs.clear();
+                self.blocked_records.clear();
+                self.blocked_resources.clear();
                 self.vector_index.clear();
                 self.conversations.clear();
                 self.idempotency = idempotency;
+                self.constraints.clear();
+                self.mutation_receipts.clear();
+                self.spent_mutation_keys.clear();
+                self.leases.clear();
                 self.users.clear();
                 self.sessions.clear();
                 self.buckets.clear();
@@ -1638,6 +1693,35 @@ impl Store {
                 self.event_workers.clear();
                 self.demo_event = None;
                 self.webhooks.clear();
+            }
+            Event::CollectionConfigured { workspace, collection, constraints } => {
+                self.constraints.insert(format!("{workspace}\0{collection}"), constraints);
+                self.rebuild_collection_index(&workspace, &collection);
+            }
+            Event::MutationCommitted { key, receipt, events, .. } => {
+                for event in events { self.apply(event); }
+                self.mutation_receipts.insert(key, receipt);
+            }
+            Event::MutationReceipt { key, receipt } => { self.mutation_receipts.insert(key, receipt); }
+            Event::MutationKeysExpired { keys } => {
+                let digests: BTreeSet<String> = keys.into_iter().collect();
+                self.mutation_receipts.retain(|key, _| !digests.contains(&mutations::key_digest(key)));
+                self.spent_mutation_keys.extend(digests);
+            }
+            Event::LeaseRemoved { key } => { self.leases.remove(&key); }
+            Event::LeaseChanged { key, lease } => { self.leases.insert(key, lease); }
+            Event::DeletionJobStarted { job } => {
+                self.deletion_jobs.insert(job.id.clone(), job);
+                self.rebuild_blocked_records();
+            }
+            Event::DeletionJobProgress { job_id, ids, completed } => {
+                for id in &ids { self.apply(Event::ArtifactDeleted { id: id.clone() }); }
+                if let Some(job) = self.deletion_jobs.get_mut(&job_id) {
+                    job.cursor += ids.len();
+                    job.completed = completed;
+                    if completed { job.plan.clear(); }
+                }
+                self.rebuild_blocked_records();
             }
             Event::Batch { events } => {
                 for event in events { self.apply(event); }
@@ -1658,6 +1742,7 @@ impl Store {
                 }
                 let artifact = Arc::new(artifact);
                 if let Some(old) = self.artifacts.insert(artifact.id.clone(), Arc::clone(&artifact)) {
+                    self.unindex_artifact(&old);
                     if let Some(kinds) = self.collection_index.get_mut(&old.workspace_id) {
                         if let Some(list) = kinds.get_mut(&old.kind) {
                             list.retain(|a| a.id != old.id);
@@ -1666,10 +1751,12 @@ impl Store {
                 }
                 self.collection_index.entry(artifact.workspace_id.clone()).or_default()
                     .entry(artifact.kind.clone()).or_default().push(Arc::clone(&artifact));
+                self.index_artifact(&artifact);
             }
             Event::ArtifactDeleted { id } => {
                 self.vector_index.remove(&id);
                 if let Some(old) = self.artifacts.remove(&id) {
+                    self.unindex_artifact(&old);
                     if let Some(kinds) = self.collection_index.get_mut(&old.workspace_id) {
                         if let Some(list) = kinds.get_mut(&old.kind) {
                             list.retain(|a| a.id != id);
@@ -1699,6 +1786,7 @@ impl Store {
                 for file_id in file_ids {
                     if let Some(file) = self.files.remove(&file_id) {
                         if let Some(old) = self.artifacts.remove(&file.artifact_id) {
+                            self.unindex_artifact(&old);
                             self.vector_index.remove(&file.artifact_id);
                             if let Some(kinds) = self.collection_index.get_mut(&old.workspace_id) {
                                 if let Some(list) = kinds.get_mut(&old.kind) {
@@ -1727,6 +1815,7 @@ impl Store {
                 }
                 let artifact = Arc::new(artifact);
                 if let Some(old) = self.artifacts.insert(artifact.id.clone(), Arc::clone(&artifact)) {
+                    self.unindex_artifact(&old);
                     if let Some(kinds) = self.collection_index.get_mut(&old.workspace_id) {
                         if let Some(list) = kinds.get_mut(&old.kind) {
                             list.retain(|a| a.id != old.id);
@@ -1735,6 +1824,7 @@ impl Store {
                 }
                 self.collection_index.entry(artifact.workspace_id.clone()).or_default()
                     .entry(artifact.kind.clone()).or_default().push(Arc::clone(&artifact));
+                self.index_artifact(&artifact);
                 self.files.insert(file.id.clone(), file);
             }
             Event::FileDeleted { id } => {
@@ -1773,6 +1863,7 @@ impl Store {
                 "storage unavailable after write failure; restart for recovery",
             ));
         }
+        self.validate_mutation_event(&event)?;
         let payload = serde_json::to_value(&event).map_err(io::Error::other)?;
         // Keep the canonical Value serialization used by replay, but reuse its
         // bytes in the frame instead of serializing the entire payload twice.
@@ -2003,7 +2094,7 @@ impl Store {
         user_id: Option<&str>,
     ) -> Option<Artifact> {
         self.get(workspace, id).filter(|artifact| {
-            self.is_record_visible(artifact, user_id, None)
+            !self.blocked_records.contains(&artifact.id) && self.is_record_visible(artifact, user_id, None)
         })
     }
 
@@ -2198,14 +2289,14 @@ impl Store {
         let mut records: Vec<_> = if let Some(k) = kind {
             if let Some(arts) = self.collection_index.get(workspace).and_then(|kinds| kinds.get(k)) {
                 arts.iter()
-                    .filter(|a| !Self::is_expired(a, &now))
+                    .filter(|a| !Self::is_expired(a, &now) && !self.blocked_records.contains(&a.id))
                     .collect()
             } else {
                 Vec::new()
             }
         } else {
             self.artifacts.values()
-                .filter(|a| a.workspace_id == workspace && !Self::is_expired(a, &now))
+                .filter(|a| a.workspace_id == workspace && !Self::is_expired(a, &now) && !self.blocked_records.contains(&a.id))
                 .collect()
         };
         records.sort_unstable_by(|a, b| (&a.created_at, &a.id).cmp(&(&b.created_at, &b.id)));
@@ -2229,7 +2320,7 @@ impl Store {
         if let Some(k) = kind {
             if let Some(arts) = self.collection_index.get(workspace).and_then(|kinds| kinds.get(k)) {
                 arts.iter()
-                    .filter(|a| !Self::is_expired(a, &now) && self.is_record_visible(a, user_id, owned_files.as_ref()))
+                    .filter(|a| !Self::is_expired(a, &now) && !self.blocked_records.contains(&a.id) && self.is_record_visible(a, user_id, owned_files.as_ref()))
                     .collect()
             } else {
                 Vec::new()
@@ -2723,6 +2814,22 @@ impl Store {
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect();
         let mut events = vec![Event::SnapshotReset { idempotency }];
+        for (key, constraints) in &self.constraints {
+            let (workspace, collection) = key.split_once('\0').unwrap();
+            events.push(Event::CollectionConfigured { workspace: workspace.into(), collection: collection.into(), constraints: constraints.clone() });
+        }
+        let receipt_cutoff = now.timestamp_millis() - self.receipt_retention_ms;
+        let expired_receipts: Vec<String> = self.mutation_receipts.iter()
+            .filter(|(_, receipt)| receipt.created_at_ms != 0 && receipt.created_at_ms <= receipt_cutoff)
+            .map(|(key, _)| mutations::key_digest(key)).collect();
+        let mut spent = self.spent_mutation_keys.iter().cloned().collect::<Vec<_>>();
+        spent.extend(expired_receipts);
+        if !spent.is_empty() { events.push(Event::MutationKeysExpired { keys: spent }); }
+        events.extend(self.mutation_receipts.iter()
+            .filter(|(_, receipt)| receipt.created_at_ms == 0 || receipt.created_at_ms > receipt_cutoff)
+            .map(|(key, receipt)| Event::MutationReceipt { key: key.clone(), receipt: receipt.clone() }));
+        events.extend(self.leases.iter().filter(|(_, lease)| lease.expires_at > now.timestamp_millis())
+            .map(|(key, lease)| Event::LeaseChanged { key: key.clone(), lease: lease.clone() }));
         events.extend(
             self.users
                 .values()
@@ -2793,6 +2900,7 @@ impl Store {
                     conversation: conversation.clone(),
                 }),
         );
+        events.extend(self.deletion_jobs.values().map(|job| Event::DeletionJobStarted { job: job.clone() }));
 
         // Stage the snapshot without changing live state. The old head is the
         // authenticated predecessor, and every snapshot frame consumes a new seq.

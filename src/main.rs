@@ -255,6 +255,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(event) = demo_event {
         api::dispatch_demo_event(app.clone(), event);
     }
+    api::resume_deletion_jobs(app.clone());
     axum::serve(listener, api::router(app))
         .with_graceful_shutdown(shutdown())
         .await?;

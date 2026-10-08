@@ -687,7 +687,4 @@ function createNioDB(options = {}) {
   return new NioDB(options);
 }
 
-module.exports = {
-  NioDB,
-  createNioDB,
-};
+export { NioDB, createNioDB };

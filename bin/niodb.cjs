@@ -56,7 +56,7 @@ function executable() {
   if (process.env.NIODB_BIN) return resolve(process.env.NIODB_BIN);
   const platform = process.platform;
   const arch = process.arch;
-  if (!['linux', 'darwin', 'win32'].includes(platform) || !['x64', 'arm64'].includes(arch)) {
+  if (!['linux', 'darwin', 'win32'].includes(platform) || !['x64', 'arm64'].includes(arch) || (platform === 'win32' && arch === 'arm64')) {
     throw new Error(`Unsupported platform ${platform}/${arch}. Build NioDB with Cargo and set NIODB_BIN.`);
   }
   const name = `@nio-labs/nio-db-${platform}-${arch}`;
@@ -67,7 +67,8 @@ function executable() {
     const localRelease = join(__dirname, '..', 'target', 'release', platform === 'win32' ? 'niodb.exe' : 'niodb');
     if (existsSync(localRelease)) return localRelease;
     const localDebug = join(__dirname, '..', 'target', 'debug', platform === 'win32' ? 'niodb.exe' : 'niodb');
-    const cacheDir = join(homedir(), '.niodb', 'bin');
+    const version = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8')).version;
+    const cacheDir = join(homedir(), '.niodb', 'bin', version);
     const asset = platform === 'win32' ? `niodb-${platform}-${arch}.exe` : `niodb-${platform}-${arch}`;
     const cachedBinary = join(cacheDir, asset);
     if (existsSync(cachedBinary)) {
@@ -75,11 +76,16 @@ function executable() {
     }
     try {
       mkdirSync(cacheDir, { recursive: true });
-      const version = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8')).version;
       const url = `https://github.com/nio-labs/nio-db/releases/download/v${version}/${asset}`;
       console.error(`Downloading NioDB native binary (${asset})...`);
-      execFileSync('curl', ['-sSL', '-f', url, '-o', cachedBinary], { stdio: 'inherit' });
-      chmodSync(cachedBinary, 0o755);
+      const stagedBinary = `${cachedBinary}.${randomBytes(8).toString('hex')}.tmp`;
+      try {
+        execFileSync('curl', ['-sSL', '-f', url, '-o', stagedBinary], { stdio: 'inherit' });
+        chmodSync(stagedBinary, 0o755);
+        renameSync(stagedBinary, cachedBinary);
+      } finally {
+        if (existsSync(stagedBinary)) unlinkSync(stagedBinary);
+      }
       if (existsSync(cachedBinary)) return cachedBinary;
     } catch {}
     throw new Error(`Missing ${name}. Install with optional dependencies enabled, or build from source and set NIODB_BIN.`);

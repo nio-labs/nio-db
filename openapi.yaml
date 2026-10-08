@@ -16,6 +16,266 @@ servers:
 security:
 - bearerAuth: []
 paths:
+  /api/v1/persistence/status:
+    get:
+      operationId: getPersistenceStatus
+      summary: Inspect storage capacity and job progress counters
+      description: Backend credentials only. Counts are current server snapshots.
+      responses:
+        '200':
+          description: Current receipt, lease, deletion job and index counters
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [active_receipts, receipt_limit, receipt_retention_days, spent_keys, active_leases, active_lease_limit, pending_deletion_jobs, indexed_keys]
+                properties:
+                  active_receipts: {type: integer}
+                  receipt_limit: {type: integer}
+                  receipt_retention_days: {type: integer}
+                  spent_keys: {type: integer}
+                  active_leases: {type: integer}
+                  active_lease_limit: {type: integer}
+                  pending_deletion_jobs: {type: integer}
+                  indexed_keys: {type: integer}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/deletion-jobs:
+    post:
+      operationId: startDeletionJob
+      summary: Tombstone and delete a configured reference cascade
+      description: >-
+        Backend credentials only. A durable child-before-parent plan marks all
+        selected records inaccessible in one journal frame; background cleanup
+        commits at most 1000 deletions per frame and resumes after restart. Active
+        leases, cycles and linked file artifacts prevent job creation. At most
+        100000 records and 8 MiB per plan; at most 32 jobs pending. Same key/root
+        returns the same job, including after completion. See docs/APPLICATION_STORAGE.md.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [idempotency_key, root_id]
+              properties:
+                idempotency_key: {type: string, minLength: 1, maxLength: 128}
+                root_id: {type: string}
+      responses:
+        '200':
+          description: Durable job state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job: {$ref: '#/components/schemas/DeletionJobStatus'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/deletion-jobs/{id}:
+    get:
+      operationId: getDeletionJob
+      summary: Read exact durable deletion progress
+      description: Backend credentials only. Status is pending or complete.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: Durable job state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job: {$ref: '#/components/schemas/DeletionJobStatus'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/collections/{collection}/constraints:
+    parameters:
+    - name: collection
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 128}
+    get:
+      operationId: getCollectionConstraints
+      summary: Read an installed application collection policy
+      description: Backend credentials only. Returns null when no policy is installed.
+      responses:
+        '200':
+          description: Installed policy or null
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  constraints:
+                    oneOf:
+                    - {$ref: '#/components/schemas/CollectionConstraints'}
+                    - {type: 'null'}
+        default: {$ref: '#/components/responses/Error'}
+    put:
+      operationId: configureCollection
+      summary: Install durable application collection constraints
+      description: >-
+        Backend credentials only. Identical installation is idempotent; replacing a
+        policy conflicts. Validates existing data. Target fields must be unique;
+        install parent policies first. Unique fields are required strings of at most
+        256 bytes. TTL/expiry is prohibited. At most 1000 policies per server.
+        Policies survive journal replay and vacuum. See docs/APPLICATION_STORAGE.md.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CollectionConstraints'}
+      responses:
+        '200':
+          description: Policy installed or already identical
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  constraints: {$ref: '#/components/schemas/CollectionConstraints'}
+        '409':
+          description: constraint_conflict, unique_conflict or reference_conflict
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/mutations:
+    post:
+      operationId: mutateAtomically
+      summary: Commit a bounded atomic application mutation
+      description: >-
+        Backend credentials only. Validates the entire final state and active lease
+        proofs before one durable journal frame commits. One to 1000 operations,
+        at most 1000 proofs, at most 8 MiB each for JSON request and merged result. Updates merge data and require an
+        expected revision; deletes require an expected revision. Each existing ID
+        may occur once. TTL and deleting storage-linked file records are unsupported.
+        References use application keys. Idempotency is scoped by workspace/principal:
+        identical ordered operations return the original receipt, including after
+        deletion, restart and vacuum. Different operations conflict. Proofs are excluded
+        from the fingerprint. Receipt responses are retained for a configurable
+        1-365 days (default 30); expired keys remain spent and return mutation_expired.
+        Active receipt capacity defaults to 100000 and may be configured to 1000000;
+        exhausted capacity returns receipt_limit. Truncated final frames have no
+        effect; committed frames replay completely. Legacy bulk behavior is unchanged.
+        Use deletion jobs for cascades that exceed one mutation request.
+        See docs/APPLICATION_STORAGE.md for recovery and all error codes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [idempotency_key, operations]
+              properties:
+                idempotency_key: {type: string, minLength: 1, maxLength: 128}
+                operations:
+                  type: array
+                  minItems: 1
+                  maxItems: 1000
+                  items: {$ref: '#/components/schemas/AtomicMutation'}
+                leases:
+                  type: array
+                  maxItems: 1000
+                  default: []
+                  items: {$ref: '#/components/schemas/LeaseProof'}
+      responses:
+        '200':
+          description: Committed result or original retry receipt
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [records, deleted]
+                properties:
+                  records:
+                    type: array
+                    items: {$ref: '#/components/schemas/MutationArtifact'}
+                  deleted:
+                    type: array
+                    items: {type: string}
+        '409':
+          description: unique_conflict, reference_conflict, revision_conflict, mutation_conflict, lease_required or lease_conflict
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '413':
+          description: mutation_too_large or HTTP body limit exceeded
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/leases:
+    get:
+      operationId: getResourceLease
+      summary: Inspect shared resource ownership
+      description: Backend credentials only. Released resources return null; globally increasing journal fences prevent reuse.
+      parameters:
+      - name: resource
+        in: query
+        required: true
+        schema: {type: string, minLength: 1, maxLength: 512}
+      responses:
+        '200':
+          description: Lease or null, and current server-clock activity
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  active: {type: boolean}
+                  lease:
+                    oneOf:
+                    - {$ref: '#/components/schemas/ResourceLease'}
+                    - {type: 'null'}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      operationId: changeResourceLease
+      summary: Acquire, renew or release fenced resource ownership
+      description: >-
+        Backend credentials only. Acquire increments the retained counter after expiry
+        or release. Same active owner retries return the current lease without extending
+        it. Renew requires active ownership and fence. Release requires matching owner
+        and fence; repeats are safe. Competing owners and stale fences conflict.
+        Server-clock durations are 1000 to 300000 ms. Counters survive restart/vacuum;
+        active lease capacity defaults to 100000, configurable to 1000000. Expired
+        leases are pruned during acquisition; durable journal sequence numbers
+        provide strictly increasing fences after release, expiry, restart or vacuum.
+        Guarded writes must use mutation proofs; legacy writes cannot bypass guards. Database fencing does not
+        stop external processes; execution bridges must handle lease loss.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action, resource, owner]
+              properties:
+                action: {type: string, enum: [acquire, renew, release]}
+                resource: {type: string, minLength: 1, maxLength: 512}
+                owner: {type: string, minLength: 1, maxLength: 128}
+                fence: {type: integer, minimum: 1, description: Required for renew and release}
+                ttl_ms: {type: integer, minimum: 1000, maximum: 300000, default: 30000}
+      responses:
+        '200':
+          description: Durable ownership result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  lease: {$ref: '#/components/schemas/ResourceLease'}
+        '409':
+          description: lease_conflict
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /guide:
     get:
       operationId: getGuides
@@ -1514,6 +1774,98 @@ components:
       description: Bearer credential supporting combined client-token:secret-token (or individual client/secret tokens, both with full backend access), or expiring app-user session. Keep backend credentials off public web/mobile clients. Registration requires a backend credential; me/logout require a user session.
   parameters: {}
   schemas:
+    DeletionJobStatus:
+      type: object
+      required: [id, root_id, status, deleted, total, created_at_ms]
+      properties:
+        id: {type: string}
+        root_id: {type: string}
+        status: {type: string, enum: [pending, complete]}
+        deleted: {type: integer}
+        total: {type: integer}
+        created_at_ms: {type: integer}
+    CollectionConstraints:
+      type: object
+      additionalProperties: false
+      properties:
+        unique:
+          type: array
+          maxItems: 16
+          uniqueItems: true
+          default: []
+          items: {type: string, minLength: 1, maxLength: 128}
+        references:
+          type: array
+          maxItems: 16
+          default: []
+          items:
+            type: object
+            additionalProperties: false
+            required: [field, collection, target_field]
+            properties:
+              field: {type: string, minLength: 1, maxLength: 128}
+              collection: {type: string, minLength: 1, maxLength: 128}
+              target_field: {type: string, minLength: 1, maxLength: 128}
+        lease:
+          oneOf:
+          - type: 'null'
+          - type: object
+            additionalProperties: false
+            required: [field, prefix]
+            properties:
+              field: {type: string, minLength: 1, maxLength: 128}
+              prefix: {type: string, minLength: 1, maxLength: 128}
+    LeaseProof:
+      type: object
+      additionalProperties: false
+      required: [resource, owner, fence]
+      properties:
+        resource: {type: string, minLength: 1, maxLength: 512}
+        owner: {type: string, minLength: 1, maxLength: 128}
+        fence: {type: integer, minimum: 1}
+    ResourceLease:
+      type: object
+      required: [resource, owner, fence, expires_at]
+      properties:
+        resource: {type: string}
+        owner: {type: string}
+        fence: {type: integer, minimum: 1}
+        expires_at: {type: integer, description: Server UTC epoch milliseconds; zero means released}
+    AtomicMutation:
+      oneOf:
+      - type: object
+        additionalProperties: false
+        required: [action, collection, data]
+        properties:
+          action: {const: create}
+          collection: {type: string, minLength: 1, maxLength: 128}
+          data: {type: object, additionalProperties: true}
+      - type: object
+        additionalProperties: false
+        required: [action, id, data, expected_revision]
+        properties:
+          action: {const: update}
+          id: {type: string}
+          data: {type: object, additionalProperties: true}
+          expected_revision: {type: integer, minimum: 1}
+      - type: object
+        additionalProperties: false
+        required: [action, id, expected_revision]
+        properties:
+          action: {const: delete}
+          id: {type: string}
+          expected_revision: {type: integer, minimum: 1}
+    MutationArtifact:
+      type: object
+      required: [id, workspace_id, kind, data, revision, created_at, updated_at]
+      properties:
+        id: {type: string}
+        workspace_id: {type: string}
+        kind: {type: string}
+        data: {type: object, additionalProperties: true}
+        revision: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
     Record:
       type: object
       required: [id, collection, data, revision, created_at, updated_at]

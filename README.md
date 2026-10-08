@@ -4,6 +4,15 @@ _A lightweight database with natural-language queries, powered by Nio._
 
 NioDB is a standalone Rust server. Nio and web/mobile applications connect over HTTP. Nio CLI supplies natural-language interpretation and grounded answers. AlaSQL is required for SQL and natural-language query execution, using a bounded Node subprocess.
 
+## Application persistence
+
+Application-owned collections now support durable unique application keys, references,
+atomic mutations with revision checks and retry receipts, enforced resource leases,
+restartable cascade deletion, and rebuildable equality indexes.
+See [application storage contracts](docs/APPLICATION_STORAGE.md) for API/SDK examples,
+limits, recovery semantics, and the remaining large-cascade and indexing work.
+Legacy bulk endpoints keep their existing partial-commit behavior.
+
 ## Current implementation
 
 - One workspace per server, backend bearer credentials, username/password users, record creation/retrieval, pagination and durable idempotency.

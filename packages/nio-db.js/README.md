@@ -57,3 +57,25 @@ console.log(manifest.manifest_text);
 // 4. Safe SQL Queries
 const sqlResults = await db.query("SELECT * FROM tasks WHERE status = 'pending'");
 ```
+
+
+## Application persistence and ESM
+
+Both `import { NioDB } from '@nio-labs/nio-db.js'` and CommonJS `require` are supported.
+`query(sql, parameters, options)` now transmits bound values; one-argument calls still work.
+
+New methods: `configureCollection`, `getCollectionConstraints`, `mutate`,
+`startDeletionJob`, `getDeletionJob`, `getPersistenceStatus`, `getLease`,
+`acquireLease`, `renewLease`, and `releaseLease`. Mutations accept an `idempotency_key`,
+ordered create/update/delete operations, and optional fenced lease proofs. Updates/deletes
+require `expected_revision`; existing bulk methods retain their original semantics.
+
+Requests default to a 30-second deadline and an 8-MiB response bound. Set constructor
+`timeoutMs`, `maxResponseBytes`, or injected `fetch`; pass per-request `timeoutMs` and
+`signal` to query, mutation, policy, lease, and collection CRUD methods. HTTP errors expose
+`status`, `code`, `requestId`, and `data`. No automatic retry is performed.
+
+See [the complete storage contract](https://github.com/nio-labs/nio-db/blob/main/docs/APPLICATION_STORAGE.md)
+for configuration order, transaction limits, permanent retry receipts, and lease lifecycle.
+NioJS must implement the fetch/abort/stream primitives used by the SDK before runtime parity
+can be claimed. `npm run build` generates the native ESM entry; `prepack` rebuilds it.
